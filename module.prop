@@ -4,3 +4,4 @@ version=1.0.0
 versionCode=1
 author=伴随
 description=CF Server Monitor Android/KSU Agent
+updateJson=https://raw.githubusercontent.com/chendada00/CF-Server-Monitor-KSU/main/update.json
