@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CF Server Monitor</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#111;color:#eee}
+.card{background:#1d1d1f;border-radius:16px;padding:16px;margin-bottom:14px}
+h1,h2{margin:0 0 12px} h1{font-size:22px} h2{font-size:17px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button{border:0;border-radius:10px;padding:11px 14px;background:#3a3a3c;color:#fff;font-size:15px}
+button.primary{background:#0a84ff}
+input,select{width:100%;padding:12px;border:1px solid #444;border-radius:10px;background:#2c2c2e;color:#fff;font-size:16px}
+label{display:block;margin:12px 0 6px}
+pre{white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto;margin:0}
+.badge{font-weight:700}.running{color:#30d158}.stopped{color:#ff453a}
+.muted{color:#aaa;font-size:13px}
+#message{min-height:20px}
+</style>
+<script type="module">
+import { exec } from 'kernelsu';
+
+const MODDIR = '/data/adb/modules/cf-server-monitor';
+const MANAGER = `${MODDIR}/scripts/manager.sh`;
+const CONFIG = `${MODDIR}/config/config.conf`;
+const SAVER = `${MODDIR}/scripts/save-config.sh`;
+
+const $ = id => document.getElementById(id);
+
+async function run(command) {
+  const result = await exec(command);
+  return [result?.stdout || '', result?.stderr || ''].filter(Boolean).join('\n').trim();
+}
+
+function shellQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
+function parseConfig(text) {
+  const out = {};
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^([A-Z_]+)="(.*)"$/);
+    if (!m) continue;
+    out[m[1]] = m[2].replace(/\\(["\\$`])/g, '$1');
+  }
+  return out;
+}
+
+window.refreshStatus = async () => {
+  const out = await run(shellQuote(MANAGER) + ' status');
+  const running = out.includes('RUNNING');
+  $('status').textContent = running ? '● 运行中' : '● 已停止';
+  $('status').className = 'badge ' + (running ? 'running' : 'stopped');
+  $('statusDetail').textContent = out;
+};
+
+window.loadConfig = async () => {
+  const text = await run('cat ' + shellQuote(CONFIG));
+  const c = parseConfig(text);
+  $('id').value = c.ID || '';
+  $('secret').value = c.SECRET || '';
+  $('url').value = c.URL || '';
+  $('interval').value = c.INTERVAL || '60';
+  $('collectInterval').value = c.COLLECT_INTERVAL || '0';
+  $('connectionMode').value = c.CONNECTION_MODE || 'http';
+};
+
+function b64Utf8(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+window.saveConfig = async (restart = false) => {
+  const payload = [
+    `ID=${$('id').value}`,
+    `SECRET=${$('secret').value}`,
+    `URL=${$('url').value}`,
+    `INTERVAL=${$('interval').value}`,
+    `COLLECT_INTERVAL=${$('collectInterval').value}`,
+    `CONNECTION_MODE=${$('connectionMode').value}`
+  ].join('\n');
+
+  const encoded = b64Utf8(payload);
+  $('message').textContent = '正在保存...';
+
+  const cmd = `printf %s ${shellQuote(encoded)} | ${shellQuote(SAVER)}`;
+  const out = await run(cmd);
+
+  if (!out.includes('OK')) {
+    $('message').textContent = out || '保存失败';
+    return;
+  }
+
+  if (restart) {
+    const r = await run(shellQuote(MANAGER) + ' restart');
+    $('message').textContent = '配置已保存并重启。\n' + r;
+  } else {
+    $('message').textContent = '配置已保存。';
+  }
+  await refreshStatus();
+};
+
+window.action = async (name) => {
+  $('message').textContent = '正在执行 ' + name + '...';
+  const out = await run(shellQuote(MANAGER) + ' ' + name);
+  $('message').textContent = out || '完成';
+  await refreshStatus();
+};
+
+window.showLogs = async () => {
+  $('logs').textContent = await run(shellQuote(MANAGER) + ' logs');
+};
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadConfig();
+  await refreshStatus();
+});
+</script>
+</head>
+<body>
+<div class="card">
+  <h1>CF Server Monitor</h1>
+  <div id="status" class="badge">加载中...</div>
+  <pre id="statusDetail" class="muted"></pre>
+</div>
+
+<div class="card">
+  <h2>探针控制</h2>
+  <div class="row">
+    <button class="primary" onclick="action('start')">启动</button>
+    <button onclick="action('stop')">停止</button>
+    <button onclick="action('restart')">重启</button>
+    <button onclick="refreshStatus()">刷新状态</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>连接配置</h2>
+  <label>Agent ID</label><input id="id" autocomplete="off">
+  <label>Secret</label><input id="secret" type="password" autocomplete="off">
+  <label>Server URL</label><input id="url" type="url" autocomplete="off">
+  <label>上报间隔（秒）</label><input id="interval" type="number" min="0">
+  <label>采集间隔</label><input id="collectInterval" type="number" min="0">
+  <label>连接方式</label>
+  <select id="connectionMode"><option value="http">HTTP</option><option value="https">HTTPS</option></select>
+  <div class="row">
+    <button onclick="saveConfig(false)">保存配置</button>
+    <button class="primary" onclick="saveConfig(true)">保存并重启</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>日志</h2>
+  <div class="row"><button onclick="showLogs()">刷新日志</button></div>
+  <pre id="logs">点击“刷新日志”查看最近 100 行。</pre>
+</div>
+
+<div class="card"><pre id="message"></pre></div>
+</body>
+</html>
