@@ -1,148 +1,178 @@
 #!/system/bin/sh
 
-MODDIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+MODDIR="${0%/*}"
+MODDIR="${MODDIR%/*}"
+
+DATA_DIR="/data/adb/cf-server-monitor"
+
 BIN="$MODDIR/bin/cf-probe"
-CONFIG="$MODDIR/config/config.conf"
-PIDFILE="$MODDIR/cf-probe.pid"
-LOGDIR="$MODDIR/logs"
-LOGFILE="$LOGDIR/cf-probe.log"
+DEFAULT_CONFIG="$MODDIR/config/config.conf"
+CONFIG="$DATA_DIR/config.conf"
 
-mkdir -p "$LOGDIR"
+PIDFILE="$DATA_DIR/cf-probe.pid"
+LOGFILE="$DATA_DIR/cf-probe.log"
 
-log() {
-    printf '%s\n' "$*"
-}
+mkdir -p "$DATA_DIR"
 
-load_config() {
-    [ -f "$CONFIG" ] || {
-        log "ERROR: config file not found"
-        return 1
-    }
-
-    # shellcheck disable=SC1090
-    . "$CONFIG"
-
-    [ -n "${ID:-}" ] || { log "ERROR: ID is empty"; return 1; }
-    [ -n "${SECRET:-}" ] || { log "ERROR: SECRET is empty"; return 1; }
-    [ -n "${URL:-}" ] || { log "ERROR: URL is empty"; return 1; }
-
-    INTERVAL="${INTERVAL:-60}"
-    COLLECT_INTERVAL="${COLLECT_INTERVAL:-0}"
-    CONNECTION_MODE="${CONNECTION_MODE:-http}"
+init_config() {
+    if [ ! -f "$CONFIG" ]; then
+        echo "Initializing config..."
+        cp "$DEFAULT_CONFIG" "$CONFIG" || return 1
+        chmod 600 "$CONFIG"
+    fi
 }
 
 pid_alive() {
-    [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
+    [ -n "$1" ] && kill -0 "$1" 2>/dev/null
 }
 
 get_pid() {
     [ -f "$PIDFILE" ] || return 1
-    pid=$(cat "$PIDFILE" 2>/dev/null)
-    case "$pid" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    pid_alive "$pid" || return 1
-    printf '%s\n' "$pid"
-}
 
-is_running() {
-    get_pid >/dev/null 2>&1
+    PID="$(cat "$PIDFILE" 2>/dev/null)"
+
+    case "$PID" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+    esac
+
+    pid_alive "$PID" || return 1
+
+    echo "$PID"
 }
 
 start() {
-    if pid=$(get_pid); then
-        log "Already running. PID=$pid"
+    init_config || {
+        echo "ERROR: failed to initialize config"
+        return 1
+    }
+
+    if PID="$(get_pid)"; then
+        echo "Already running. PID=$PID"
         return 0
     fi
 
     rm -f "$PIDFILE"
 
-    [ -x "$BIN" ] || {
-        log "ERROR: cf-probe is missing or not executable: $BIN"
+    if [ ! -f "$BIN" ]; then
+        echo "ERROR: cf-probe not found:"
+        echo "$BIN"
         return 1
-    }
+    fi
 
-    load_config || return 1
+    if [ ! -x "$BIN" ]; then
+        echo "ERROR: cf-probe is not executable:"
+        echo "$BIN"
+        return 1
+    fi
 
-    log "Starting cf-probe..."
+    echo "Starting CF Server Monitor..."
 
-    nohup "$BIN" \
-        -id="$ID" \
-        -secret="$SECRET" \
-        -url="$URL" \
-        -collect_interval="$COLLECT_INTERVAL" \
-        -interval="$INTERVAL" \
-        -connection_mode="$CONNECTION_MODE" \
-        >> "$LOGFILE" 2>&1 &
+    # 官方 Agent 正确的运行方式：
+    #
+    # cf-probe run -config=/path/config.conf
+    #
+    # 不要在这里传 -id -secret -url，
+    # 这些参数属于 cf-probe install。
 
-    pid=$!
+    nohup "$BIN" run \
+        -config="$CONFIG" \
+        >> "$LOGFILE" 2>&1 < /dev/null &
 
-    sleep 1
+    PID=$!
 
-    if pid_alive "$pid"; then
-        printf '%s\n' "$pid" > "$PIDFILE"
-        log "Started successfully. PID=$pid"
+    sleep 2
+
+    if pid_alive "$PID"; then
+        echo "$PID" > "$PIDFILE"
+        echo "Started successfully."
+        echo "PID=$PID"
         return 0
     fi
 
-    log "ERROR: process exited during startup"
+    echo "ERROR: cf-probe failed to start"
+    echo
+    echo "Last log:"
+    tail -n 30 "$LOGFILE" 2>/dev/null
+
+    rm -f "$PIDFILE"
+
     return 1
 }
 
 stop() {
-    if ! pid=$(get_pid); then
+    PID="$(get_pid)"
+
+    if [ -z "$PID" ]; then
         rm -f "$PIDFILE"
-        log "Already stopped."
+        echo "Already stopped."
         return 0
     fi
 
-    log "Stopping cf-probe. PID=$pid"
-    kill "$pid" 2>/dev/null || true
+    echo "Stopping CF Server Monitor..."
+    echo "PID=$PID"
 
-    i=0
-    while pid_alive "$pid"; do
-        i=$((i + 1))
-        [ "$i" -ge 10 ] && break
+    kill "$PID" 2>/dev/null || true
+
+    COUNT=0
+
+    while pid_alive "$PID"; do
+        COUNT=$((COUNT + 1))
+
+        if [ "$COUNT" -ge 10 ]; then
+            break
+        fi
+
         sleep 1
     done
 
-    if pid_alive "$pid"; then
-        log "Graceful stop timed out, sending SIGKILL."
-        kill -9 "$pid" 2>/dev/null || true
+    if pid_alive "$PID"; then
+        echo "Graceful stop timed out."
+        echo "Force killing..."
+
+        kill -9 "$PID" 2>/dev/null || true
         sleep 1
+    fi
+
+    if pid_alive "$PID"; then
+        echo "ERROR: failed to stop process"
+        return 1
     fi
 
     rm -f "$PIDFILE"
 
-    if pid_alive "$pid"; then
-        log "ERROR: failed to stop process"
-        return 1
-    fi
-
-    log "Stopped."
+    echo "Stopped."
 }
 
 restart() {
+    echo "Restarting..."
+
     stop || return 1
+
     sleep 1
+
     start
 }
 
 status() {
-    if pid=$(get_pid); then
-        log "RUNNING"
-        log "PID=$pid"
+    init_config >/dev/null 2>&1
+
+    if PID="$(get_pid)"; then
+        echo "STATUS=RUNNING"
+        echo "PID=$PID"
     else
-        log "STOPPED"
+        echo "STATUS=STOPPED"
     fi
 
+    echo
+    echo "CONFIG=$CONFIG"
+    echo "LOG=$LOGFILE"
+
     if [ -f "$CONFIG" ]; then
-        . "$CONFIG"
-        log "ID=${ID:-}"
-        log "URL=${URL:-}"
-        log "INTERVAL=${INTERVAL:-}"
-        log "COLLECT_INTERVAL=${COLLECT_INTERVAL:-}"
-        log "CONNECTION_MODE=${CONNECTION_MODE:-}"
+        echo
+        echo "Configuration:"
+        grep -v '^SECRET=' "$CONFIG" 2>/dev/null
     fi
 }
 
@@ -150,18 +180,47 @@ logs() {
     if [ -f "$LOGFILE" ]; then
         tail -n 100 "$LOGFILE"
     else
-        log "No logs yet."
+        echo "No logs yet."
+    fi
+}
+
+version() {
+    if [ -x "$BIN" ]; then
+        "$BIN" version
+    else
+        echo "cf-probe not found or not executable"
+        return 1
     fi
 }
 
 case "${1:-}" in
-    start) start ;;
-    stop) stop ;;
-    restart) restart ;;
-    status) status ;;
-    logs) logs ;;
+    start)
+        start
+        ;;
+
+    stop)
+        stop
+        ;;
+
+    restart)
+        restart
+        ;;
+
+    status)
+        status
+        ;;
+
+    logs)
+        logs
+        ;;
+
+    version)
+        version
+        ;;
+
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs}"
+        echo "Usage:"
+        echo "$0 {start|stop|restart|status|logs|version}"
         exit 2
         ;;
 esac

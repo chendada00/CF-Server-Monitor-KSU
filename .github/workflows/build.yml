@@ -1,55 +1,87 @@
 name: Build CF Server Monitor KSU Module
 
 on:
+
   push:
-    branches: [main]
-    tags: ['v*']
+    branches:
+      - main
+
+    tags:
+      - 'v*'
+
   workflow_dispatch:
+
 
 permissions:
   contents: write
 
+
 jobs:
+
   build:
+
     runs-on: ubuntu-latest
 
+
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
+
       - name: Download latest ARM64 probe
         run: |
+
           mkdir -p bin
-      
-          curl -fL --retry 3 --retry-delay 2 \
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
             -o bin/cf-probe \
             https://github.com/huilang-me/cfsm-agent/releases/latest/download/cf-probe-linux-arm64
-      
+
           chmod 755 bin/cf-probe
-      
+
+          echo "Binary information:"
+
           file bin/cf-probe
+
+          echo
+
+          echo "Binary version:"
+
+          bin/cf-probe version
+
 
       - name: Read module version
         id: version
         shell: bash
         run: |
+
           VERSION=$(awk -F= '$1=="version"{print $2}' module.prop)
+
           VERSION_CODE=$(awk -F= '$1=="versionCode"{print $2}' module.prop)
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
 
       - name: Build flashable ZIP
         shell: bash
         run: |
+
           rm -rf dist stage
 
-          mkdir -p stage/CF-Server-Monitor-KSU
+          mkdir -p stage/module
+
           mkdir -p dist
+
 
           cp -a \
             module.prop \
             skip_mount \
+            customize.sh \
             boot-completed.sh \
             uninstall.sh \
             action.sh \
@@ -57,27 +89,46 @@ jobs:
             config \
             scripts \
             webroot \
-            stage/CF-Server-Monitor-KSU/
+            stage/module/
 
-          find stage/CF-Server-Monitor-KSU \
-            -type f \
-            -name "*.sh" \
-            -exec chmod 755 {} +
 
           chmod 755 \
-            stage/CF-Server-Monitor-KSU/bin/cf-probe
+            stage/module/customize.sh
 
-          cd stage/CF-Server-Monitor-KSU
+          chmod 755 \
+            stage/module/boot-completed.sh
+
+          chmod 755 \
+            stage/module/uninstall.sh
+
+          chmod 755 \
+            stage/module/action.sh
+
+          chmod 755 \
+            stage/module/scripts/manager.sh
+
+          chmod 755 \
+            stage/module/scripts/save-config.sh
+
+          chmod 755 \
+            stage/module/bin/cf-probe
+
+
+          cd stage/module
 
           zip -r \
             ../../dist/CF-Server-Monitor-KSU.zip \
             .
 
+
       - name: Generate update.json
         shell: bash
         run: |
+
           VERSION="${{ steps.version.outputs.version }}"
+
           VERSION_CODE="${{ steps.version.outputs.version_code }}"
+
 
           cat > update.json <<EOF
           {
@@ -88,35 +139,72 @@ jobs:
           }
           EOF
 
-      - name: Commit update.json
+
+          cat update.json
+
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+
+          name: CF-Server-Monitor-KSU
+
+          path: |
+
+            dist/CF-Server-Monitor-KSU.zip
+
+            update.json
+
+
+      - name: Commit update.json to main
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
+
           git config user.name "github-actions[bot]"
+
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+
+          git fetch origin main
+
+
+          git checkout main
+
+
+          git pull --ff-only origin main
+
+
+          cp "$GITHUB_WORKSPACE/update.json" update.json
+
 
           git add update.json
 
+
           if git diff --cached --quiet; then
+
             echo "update.json has no changes"
+
           else
-            git commit -m "chore: update module metadata"
-            git push origin HEAD:main
+
+            git commit \
+              -m "chore: update module metadata to ${{ steps.version.outputs.version }}"
+
+            git push origin main
+
           fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CF-Server-Monitor-KSU
-          path: |
-            dist/CF-Server-Monitor-KSU.zip
-            update.json
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
+
         with:
+
           generate_release_notes: true
+
           files: |
+
             dist/CF-Server-Monitor-KSU.zip
+
             update.json

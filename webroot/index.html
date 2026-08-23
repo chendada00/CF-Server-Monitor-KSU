@@ -2,164 +2,868 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+>
+
 <title>CF Server Monitor</title>
+
 <style>
-:root{color-scheme:dark}
-*{box-sizing:border-box}
-body{margin:0;padding:16px;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#111;color:#eee}
-.card{background:#1d1d1f;border-radius:16px;padding:16px;margin-bottom:14px}
-h1,h2{margin:0 0 12px} h1{font-size:22px} h2{font-size:17px}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-button{border:0;border-radius:10px;padding:11px 14px;background:#3a3a3c;color:#fff;font-size:15px}
-button.primary{background:#0a84ff}
-input,select{width:100%;padding:12px;border:1px solid #444;border-radius:10px;background:#2c2c2e;color:#fff;font-size:16px}
-label{display:block;margin:12px 0 6px}
-pre{white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto;margin:0}
-.badge{font-weight:700}.running{color:#30d158}.stopped{color:#ff453a}
-.muted{color:#aaa;font-size:13px}
-#message{min-height:20px}
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 16px;
+    font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+    background: #111;
+    color: #f5f5f5;
+}
+
+.card {
+    margin-bottom: 14px;
+    padding: 16px;
+
+    background: #1d1d1f;
+
+    border-radius: 16px;
+}
+
+h1 {
+    margin: 0 0 14px;
+    font-size: 22px;
+}
+
+h2 {
+    margin: 0 0 12px;
+    font-size: 17px;
+}
+
+label {
+    display: block;
+    margin-top: 14px;
+    margin-bottom: 6px;
+}
+
+input,
+select {
+    width: 100%;
+    padding: 12px;
+
+    color: #fff;
+    background: #2c2c2e;
+
+    border: 1px solid #444;
+    border-radius: 10px;
+
+    font-size: 16px;
+}
+
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    margin-top: 12px;
+}
+
+button {
+    padding: 11px 15px;
+
+    color: #fff;
+    background: #3a3a3c;
+
+    border: 0;
+    border-radius: 10px;
+
+    font-size: 15px;
+}
+
+button.primary {
+    background: #0a84ff;
+}
+
+button:disabled {
+    opacity: .5;
+}
+
+.status {
+    font-weight: bold;
+}
+
+.running {
+    color: #30d158;
+}
+
+.stopped {
+    color: #ff453a;
+}
+
+.muted {
+    color: #aaa;
+}
+
+pre {
+    margin: 10px 0 0;
+
+    padding: 10px;
+
+    background: #000;
+
+    border-radius: 8px;
+
+    white-space: pre-wrap;
+    word-break: break-word;
+
+    max-height: 400px;
+    overflow: auto;
+}
 </style>
+
 <script type="module">
+
 import { exec } from 'kernelsu';
 
 const MODDIR = '/data/adb/modules/cf-server-monitor';
-const MANAGER = `${MODDIR}/scripts/manager.sh`;
-const CONFIG = `${MODDIR}/config/config.conf`;
-const SAVER = `${MODDIR}/scripts/save-config.sh`;
 
-const $ = id => document.getElementById(id);
+const MANAGER =
+    `${MODDIR}/scripts/manager.sh`;
 
-async function run(command) {
-  const result = await exec(command);
-  return [result?.stdout || '', result?.stderr || ''].filter(Boolean).join('\n').trim();
+const SAVER =
+    `${MODDIR}/scripts/save-config.sh`;
+
+const CONFIG =
+    '/data/adb/cf-server-monitor/config.conf';
+
+
+function $(id) {
+    return document.getElementById(id);
 }
 
-function shellQuote(s) {
-  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+
+function shellQuote(value) {
+
+    return "'" +
+        String(value).replace(
+            /'/g,
+            "'\\''"
+        ) +
+        "'";
 }
+
+
+/*
+ * KernelSU exec 返回：
+ *
+ * {
+ *   errno,
+ *   stdout,
+ *   stderr
+ * }
+ */
+function run(command) {
+
+    try {
+
+        const result = exec(command);
+
+        const stdout =
+            result?.stdout || '';
+
+        const stderr =
+            result?.stderr || '';
+
+        const errno =
+            result?.errno ?? 0;
+
+        let output =
+            [stdout, stderr]
+                .filter(Boolean)
+                .join('\n')
+                .trim();
+
+        if (errno !== 0) {
+
+            output =
+                `ERROR errno=${errno}\n` +
+                output;
+
+        }
+
+        return output || 'OK';
+
+    } catch (error) {
+
+        return (
+            'ERROR: ' +
+            (
+                error?.message ||
+                String(error)
+            )
+        );
+    }
+}
+
+
+function showMessage(text) {
+
+    $('message').textContent = text;
+
+}
+
+
+function setButtonsDisabled(disabled) {
+
+    document
+        .querySelectorAll('button')
+        .forEach(button => {
+
+            button.disabled = disabled;
+
+        });
+}
+
 
 function parseConfig(text) {
-  const out = {};
-  for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^([A-Z_]+)="(.*)"$/);
-    if (!m) continue;
-    out[m[1]] = m[2].replace(/\\(["\\$`])/g, '$1');
-  }
-  return out;
+
+    const result = {};
+
+    for (
+        const line of text.split(/\r?\n/)
+    ) {
+
+        const trimmed = line.trim();
+
+        if (
+            !trimmed ||
+            trimmed.startsWith('#')
+        ) {
+            continue;
+        }
+
+        const index =
+            trimmed.indexOf('=');
+
+        if (index < 0) {
+            continue;
+        }
+
+        const key =
+            trimmed.substring(0, index).trim();
+
+        let value =
+            trimmed.substring(index + 1).trim();
+
+        if (
+            value.startsWith('"') &&
+            value.endsWith('"')
+        ) {
+
+            value =
+                value.substring(
+                    1,
+                    value.length - 1
+                );
+
+        }
+
+        value =
+            value.replace(
+                /\\"/g,
+                '"'
+            );
+
+        value =
+            value.replace(
+                /\\\\/g,
+                '\\'
+            );
+
+        result[key] = value;
+    }
+
+    return result;
 }
 
-window.refreshStatus = async () => {
-  const out = await run(shellQuote(MANAGER) + ' status');
-  const running = out.includes('RUNNING');
-  $('status').textContent = running ? '● 运行中' : '● 已停止';
-  $('status').className = 'badge ' + (running ? 'running' : 'stopped');
-  $('statusDetail').textContent = out;
-};
 
-window.loadConfig = async () => {
-  const text = await run('cat ' + shellQuote(CONFIG));
-  const c = parseConfig(text);
-  $('id').value = c.ID || '';
-  $('secret').value = c.SECRET || '';
-  $('url').value = c.URL || '';
-  $('interval').value = c.INTERVAL || '60';
-  $('collectInterval').value = c.COLLECT_INTERVAL || '0';
-  $('connectionMode').value = c.CONNECTION_MODE || 'http';
-};
+function base64Utf8(text) {
 
-function b64Utf8(text) {
-  const bytes = new TextEncoder().encode(text);
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
+    const bytes =
+        new TextEncoder()
+            .encode(text);
+
+    let binary = '';
+
+    for (const byte of bytes) {
+
+        binary +=
+            String.fromCharCode(byte);
+
+    }
+
+    return btoa(binary);
 }
 
-window.saveConfig = async (restart = false) => {
-  const payload = [
-    `ID=${$('id').value}`,
-    `SECRET=${$('secret').value}`,
-    `URL=${$('url').value}`,
-    `INTERVAL=${$('interval').value}`,
-    `COLLECT_INTERVAL=${$('collectInterval').value}`,
-    `CONNECTION_MODE=${$('connectionMode').value}`
-  ].join('\n');
 
-  const encoded = b64Utf8(payload);
-  $('message').textContent = '正在保存...';
+/*
+ * 加载配置
+ */
+window.loadConfig = function () {
 
-  const cmd = `printf %s ${shellQuote(encoded)} | ${shellQuote(SAVER)}`;
-  const out = await run(cmd);
+    const output =
+        run(
+            `cat ${shellQuote(CONFIG)} 2>/dev/null`
+        );
 
-  if (!out.includes('OK')) {
-    $('message').textContent = out || '保存失败';
-    return;
-  }
+    if (
+        output.startsWith('ERROR')
+    ) {
 
-  if (restart) {
-    const r = await run(shellQuote(MANAGER) + ' restart');
-    $('message').textContent = '配置已保存并重启。\n' + r;
-  } else {
-    $('message').textContent = '配置已保存。';
-  }
-  await refreshStatus();
+        return;
+    }
+
+    const config =
+        parseConfig(output);
+
+    $('serverId').value =
+        config.SERVER_ID || '';
+
+    $('secret').value =
+        config.SECRET || '';
+
+    $('workerUrl').value =
+        config.WORKER_URL || '';
+
+    $('collectInterval').value =
+        config.COLLECT_INTERVAL || '0';
+
+    $('reportInterval').value =
+        config.REPORT_INTERVAL || '60';
+
+    $('ctNode').value =
+        config.CT_NODE || '';
+
+    $('cuNode').value =
+        config.CU_NODE || '';
+
+    $('cmNode').value =
+        config.CM_NODE || '';
+
+    $('bdNode').value =
+        config.BD_NODE || '';
+
+    $('interface').value =
+        config.INTERFACE || '';
+
+    $('resetDay').value =
+        config.RESET_DAY || '1';
+
+    $('connectionMode').value =
+        config.CONNECTION_MODE || 'auto';
+
+    $('autoUpdate').value =
+        config.AUTO_UPDATE || '0';
+
+    $('updateProxy').value =
+        config.UPDATE_PROXY || '';
 };
 
-window.action = async (name) => {
-  $('message').textContent = '正在执行 ' + name + '...';
-  const out = await run(shellQuote(MANAGER) + ' ' + name);
-  $('message').textContent = out || '完成';
-  await refreshStatus();
+
+/*
+ * 刷新运行状态
+ */
+window.refreshStatus = function () {
+
+    const output =
+        run(
+            `/system/bin/sh ` +
+            `${shellQuote(MANAGER)} status`
+        );
+
+    const running =
+        output.includes('STATUS=RUNNING');
+
+    const status =
+        $('status');
+
+    status.textContent =
+        running
+            ? '● 运行中'
+            : '● 已停止';
+
+    status.className =
+        'status ' +
+        (
+            running
+                ? 'running'
+                : 'stopped'
+        );
+
+    $('statusDetail').textContent =
+        output;
 };
 
-window.showLogs = async () => {
-  $('logs').textContent = await run(shellQuote(MANAGER) + ' logs');
+
+/*
+ * 启动/停止/重启
+ */
+window.action = function (name) {
+
+    setButtonsDisabled(true);
+
+    showMessage(
+        `正在执行：${name}...`
+    );
+
+    const output =
+        run(
+            `/system/bin/sh ` +
+            `${shellQuote(MANAGER)} ` +
+            shellQuote(name)
+        );
+
+    showMessage(output);
+
+    refreshStatus();
+
+    setButtonsDisabled(false);
 };
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await loadConfig();
-  await refreshStatus();
-});
+
+/*
+ * 保存配置
+ */
+window.saveConfig = function (restart) {
+
+    setButtonsDisabled(true);
+
+    showMessage('正在保存配置...');
+
+    const payload = [
+
+        `SERVER_ID=${$('serverId').value}`,
+        `SECRET=${$('secret').value}`,
+        `WORKER_URL=${$('workerUrl').value}`,
+
+        `COLLECT_INTERVAL=${$('collectInterval').value}`,
+        `REPORT_INTERVAL=${$('reportInterval').value}`,
+
+        `CT_NODE=${$('ctNode').value}`,
+        `CU_NODE=${$('cuNode').value}`,
+        `CM_NODE=${$('cmNode').value}`,
+        `BD_NODE=${$('bdNode').value}`,
+
+        `INTERFACE=${$('interface').value}`,
+
+        `RESET_DAY=${$('resetDay').value}`,
+
+        `CONNECTION_MODE=${$('connectionMode').value}`,
+
+        `AUTO_UPDATE=${$('autoUpdate').value}`,
+
+        `UPDATE_PROXY=${$('updateProxy').value}`
+
+    ].join('\n');
+
+
+    const encoded =
+        base64Utf8(payload);
+
+
+    const output =
+        run(
+            `printf %s ${shellQuote(encoded)} ` +
+            `| /system/bin/sh ` +
+            `${shellQuote(SAVER)}`
+        );
+
+
+    if (!output.includes('OK')) {
+
+        showMessage(
+            '保存失败：\n' +
+            output
+        );
+
+        setButtonsDisabled(false);
+
+        return;
+    }
+
+
+    if (restart) {
+
+        const restartOutput =
+            run(
+                `/system/bin/sh ` +
+                `${shellQuote(MANAGER)} restart`
+            );
+
+        showMessage(
+            '配置已保存并重启。\n\n' +
+            restartOutput
+        );
+
+    } else {
+
+        showMessage(
+            '配置保存成功。\n\n' +
+            '提示：当前运行中的探针不会立即读取新配置。' +
+            '需要点击“重启探针”或“保存并重启”。'
+        );
+
+    }
+
+
+    refreshStatus();
+
+    setButtonsDisabled(false);
+};
+
+
+/*
+ * 查看日志
+ */
+window.showLogs = function () {
+
+    const output =
+        run(
+            `/system/bin/sh ` +
+            `${shellQuote(MANAGER)} logs`
+        );
+
+    $('logs').textContent =
+        output;
+
+};
+
+
+/*
+ * 页面加载
+ */
+document.addEventListener(
+    'DOMContentLoaded',
+    function () {
+
+        loadConfig();
+
+        refreshStatus();
+
+    }
+);
+
 </script>
+
 </head>
+
 <body>
-<div class="card">
-  <h1>CF Server Monitor</h1>
-  <div id="status" class="badge">加载中...</div>
-  <pre id="statusDetail" class="muted"></pre>
-</div>
+
 
 <div class="card">
-  <h2>探针控制</h2>
-  <div class="row">
-    <button class="primary" onclick="action('start')">启动</button>
-    <button onclick="action('stop')">停止</button>
-    <button onclick="action('restart')">重启</button>
-    <button onclick="refreshStatus()">刷新状态</button>
-  </div>
+
+    <h1>
+        CF Server Monitor
+    </h1>
+
+    <div
+        id="status"
+        class="status"
+    >
+        正在检查...
+    </div>
+
+    <pre
+        id="statusDetail"
+        class="muted"
+    ></pre>
+
 </div>
+
 
 <div class="card">
-  <h2>连接配置</h2>
-  <label>Agent ID</label><input id="id" autocomplete="off">
-  <label>Secret</label><input id="secret" type="password" autocomplete="off">
-  <label>Server URL</label><input id="url" type="url" autocomplete="off">
-  <label>上报间隔（秒）</label><input id="interval" type="number" min="0">
-  <label>采集间隔</label><input id="collectInterval" type="number" min="0">
-  <label>连接方式</label>
-  <select id="connectionMode"><option value="http">HTTP</option><option value="https">HTTPS</option></select>
-  <div class="row">
-    <button onclick="saveConfig(false)">保存配置</button>
-    <button class="primary" onclick="saveConfig(true)">保存并重启</button>
-  </div>
+
+    <h2>
+        探针控制
+    </h2>
+
+    <div class="row">
+
+        <button
+            class="primary"
+            onclick="action('start')"
+        >
+            启动探针
+        </button>
+
+        <button
+            onclick="action('stop')"
+        >
+            停止探针
+        </button>
+
+        <button
+            onclick="action('restart')"
+        >
+            重启探针
+        </button>
+
+        <button
+            onclick="refreshStatus()"
+        >
+            刷新状态
+        </button>
+
+    </div>
+
 </div>
+
 
 <div class="card">
-  <h2>日志</h2>
-  <div class="row"><button onclick="showLogs()">刷新日志</button></div>
-  <pre id="logs">点击“刷新日志”查看最近 100 行。</pre>
+
+    <h2>
+        基础配置
+    </h2>
+
+
+    <label>
+        Server ID
+    </label>
+
+    <input
+        id="serverId"
+        autocomplete="off"
+    >
+
+
+    <label>
+        Secret
+    </label>
+
+    <input
+        id="secret"
+        type="password"
+        autocomplete="off"
+    >
+
+
+    <label>
+        Worker URL
+    </label>
+
+    <input
+        id="workerUrl"
+        type="url"
+        autocomplete="off"
+    >
+
+
+    <label>
+        采集间隔（秒）
+    </label>
+
+    <input
+        id="collectInterval"
+        type="number"
+        min="0"
+    >
+
+
+    <label>
+        上报间隔（秒）
+    </label>
+
+    <input
+        id="reportInterval"
+        type="number"
+        min="1"
+    >
+
+
+    <label>
+        流量重置日（0-31）
+    </label>
+
+    <input
+        id="resetDay"
+        type="number"
+        min="0"
+        max="31"
+    >
+
+
+    <label>
+        连接模式
+    </label>
+
+    <select
+        id="connectionMode"
+    >
+
+        <option value="auto">
+            auto
+        </option>
+
+        <option value="http">
+            http
+        </option>
+
+    </select>
+
 </div>
 
-<div class="card"><pre id="message"></pre></div>
+
+<div class="card">
+
+    <h2>
+        高级配置
+    </h2>
+
+
+    <label>
+        CT Node
+    </label>
+
+    <input
+        id="ctNode"
+    >
+
+
+    <label>
+        CU Node
+    </label>
+
+    <input
+        id="cuNode"
+    >
+
+
+    <label>
+        CM Node
+    </label>
+
+    <input
+        id="cmNode"
+    >
+
+
+    <label>
+        BD Node
+    </label>
+
+    <input
+        id="bdNode"
+    >
+
+
+    <label>
+        Interface
+    </label>
+
+    <input
+        id="interface"
+        placeholder="例如：wlan0"
+    >
+
+
+    <label>
+        Agent 自动更新
+    </label>
+
+    <select
+        id="autoUpdate"
+    >
+
+        <option value="0">
+            关闭
+        </option>
+
+        <option value="1">
+            开启
+        </option>
+
+    </select>
+
+
+    <label>
+        更新代理
+    </label>
+
+    <input
+        id="updateProxy"
+        placeholder="可留空"
+    >
+
+</div>
+
+
+<div class="card">
+
+    <h2>
+        保存
+    </h2>
+
+    <div class="row">
+
+        <button
+            onclick="saveConfig(false)"
+        >
+            保存配置
+        </button>
+
+        <button
+            class="primary"
+            onclick="saveConfig(true)"
+        >
+            保存并重启
+        </button>
+
+    </div>
+
+</div>
+
+
+<div class="card">
+
+    <h2>
+        日志
+    </h2>
+
+    <div class="row">
+
+        <button
+            onclick="showLogs()"
+        >
+            刷新日志
+        </button>
+
+    </div>
+
+    <pre id="logs">
+点击“刷新日志”查看最近 100 行。
+    </pre>
+
+</div>
+
+
+<div class="card">
+
+    <h2>
+        操作结果
+    </h2>
+
+    <pre id="message"></pre>
+
+</div>
+
+
 </body>
 </html>
