@@ -20,13 +20,13 @@ jobs:
       - name: Download latest ARM64 probe
         run: |
           mkdir -p bin
-
+      
           curl -fL --retry 3 --retry-delay 2 \
             -o bin/cf-probe \
-            https://github.com/chendada00/CF-Server-Monitor/releases/latest/download/cf-probe-linux-arm64
-
+            https://github.com/huilang-me/cfsm-agent/releases/latest/download/cf-probe-linux-arm64
+      
           chmod 755 bin/cf-probe
-
+      
           file bin/cf-probe
 
       - name: Read module version
