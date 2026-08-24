@@ -2,11 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
+<meta name="viewport" content="width=device-width,initial-scale=1">
 
 <title>CF Server Monitor</title>
 
@@ -18,13 +14,7 @@
 body {
     margin: 0;
     padding: 16px;
-    font-family:
-        system-ui,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: #111;
     color: #f5f5f5;
 }
@@ -32,14 +22,12 @@ body {
 .card {
     margin-bottom: 14px;
     padding: 16px;
-
     background: #1d1d1f;
-
     border-radius: 16px;
 }
 
 h1 {
-    margin: 0 0 14px;
+    margin: 0 0 8px;
     font-size: 22px;
 }
 
@@ -58,13 +46,10 @@ input,
 select {
     width: 100%;
     padding: 12px;
-
     color: #fff;
     background: #2c2c2e;
-
     border: 1px solid #444;
     border-radius: 10px;
-
     font-size: 16px;
 }
 
@@ -72,20 +57,17 @@ select {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-
     margin-top: 12px;
 }
 
 button {
     padding: 11px 15px;
-
     color: #fff;
     background: #3a3a3c;
-
     border: 0;
     border-radius: 10px;
-
     font-size: 15px;
+    cursor: pointer;
 }
 
 button.primary {
@@ -94,6 +76,7 @@ button.primary {
 
 button:disabled {
     opacity: .5;
+    cursor: default;
 }
 
 .status {
@@ -108,520 +91,91 @@ button:disabled {
     color: #ff453a;
 }
 
+.warning {
+    color: #ffd60a;
+}
+
+.ok {
+    color: #30d158;
+}
+
+.error {
+    color: #ff453a;
+}
+
 .muted {
     color: #aaa;
 }
 
 pre {
     margin: 10px 0 0;
-
     padding: 10px;
-
     background: #000;
-
     border-radius: 8px;
-
     white-space: pre-wrap;
     word-break: break-word;
-
-    max-height: 400px;
+    max-height: 420px;
     overflow: auto;
 }
+
+.small {
+    font-size: 13px;
+}
 </style>
-
-<script type="module">
-
-import { exec } from 'kernelsu';
-
-const MODDIR = '/data/adb/modules/cf-server-monitor';
-
-const MANAGER =
-    `${MODDIR}/scripts/manager.sh`;
-
-const SAVER =
-    `${MODDIR}/scripts/save-config.sh`;
-
-const CONFIG =
-    '/data/adb/cf-server-monitor/config.conf';
-
-
-function $(id) {
-    return document.getElementById(id);
-}
-
-
-function shellQuote(value) {
-
-    return "'" +
-        String(value).replace(
-            /'/g,
-            "'\\''"
-        ) +
-        "'";
-}
-
-
-async function run(command) {
-
-    try {
-
-        const result =
-            await exec(command);
-
-        const stdout =
-            result?.stdout || '';
-
-        const stderr =
-            result?.stderr || '';
-
-        const errno =
-            result?.errno ?? 0;
-
-        let output =
-            [stdout, stderr]
-                .filter(Boolean)
-                .join('\n')
-                .trim();
-
-        if (errno !== 0) {
-
-            output =
-                `ERROR errno=${errno}\n` +
-                output;
-
-        }
-
-        return output || 'OK';
-
-    } catch (error) {
-
-        return (
-            'ERROR: ' +
-            (
-                error?.message ||
-                String(error)
-            )
-        );
-    }
-}
-
-
-function showMessage(text) {
-    $('message').textContent = text;
-}
-
-
-function setButtonsDisabled(disabled) {
-
-    document
-        .querySelectorAll('button')
-        .forEach(button => {
-            button.disabled = disabled;
-        });
-}
-
-
-function parseConfig(text) {
-
-    const result = {};
-
-    for (const line of text.split(/\r?\n/)) {
-
-        const trimmed = line.trim();
-
-        if (
-            !trimmed ||
-            trimmed.startsWith('#')
-        ) {
-            continue;
-        }
-
-        const index =
-            trimmed.indexOf('=');
-
-        if (index < 0) {
-            continue;
-        }
-
-        const key =
-            trimmed.substring(0, index).trim();
-
-        let value =
-            trimmed.substring(index + 1).trim();
-
-        if (
-            value.startsWith('"') &&
-            value.endsWith('"')
-        ) {
-
-            value =
-                value.substring(
-                    1,
-                    value.length - 1
-                );
-
-        }
-
-        value =
-            value.replace(
-                /\\"/g,
-                '"'
-            );
-
-        value =
-            value.replace(
-                /\\\\/g,
-                '\\'
-            );
-
-        result[key] = value;
-    }
-
-    return result;
-}
-
-
-/*
- * UTF-8 -> Base64
- */
-function base64Utf8(text) {
-
-    const bytes =
-        new TextEncoder()
-            .encode(text);
-
-    let binary = '';
-
-    for (const byte of bytes) {
-        binary += String.fromCharCode(byte);
-    }
-
-    return btoa(binary);
-}
-
-
-/*
- * 加载配置
- */
-window.loadConfig = async function () {
-
-    const output =
-        await run(
-            `cat ${shellQuote(CONFIG)} 2>/dev/null`
-        );
-
-    if (output.startsWith('ERROR')) {
-        showMessage(
-            '配置尚未创建，请填写后保存。'
-        );
-        return;
-    }
-
-    const config =
-        parseConfig(output);
-
-    $('serverId').value =
-        config.SERVER_ID || '';
-
-    $('secret').value =
-        config.SECRET || '';
-
-    $('workerUrl').value =
-        config.WORKER_URL || '';
-
-    $('collectInterval').value =
-        config.COLLECT_INTERVAL || '0';
-
-    $('reportInterval').value =
-        config.REPORT_INTERVAL || '60';
-
-    $('ctNode').value =
-        config.CT_NODE || '';
-
-    $('cuNode').value =
-        config.CU_NODE || '';
-
-    $('cmNode').value =
-        config.CM_NODE || '';
-
-    $('bdNode').value =
-        config.BD_NODE || '';
-
-    $('interface').value =
-        config.INTERFACE || '';
-
-    $('resetDay').value =
-        config.RESET_DAY || '1';
-
-    $('connectionMode').value =
-        config.CONNECTION_MODE || 'auto';
-
-    $('autoUpdate').value =
-        config.AUTO_UPDATE || '0';
-
-    $('updateProxy').value =
-        config.UPDATE_PROXY || '';
-    $('debug').value =
-        config.DEBUG || '0';
-
-    showMessage('配置加载完成。');
-};
-
-
-/*
- * 刷新状态
- */
-window.refreshStatus = async function () {
-
-    const output =
-        await run(
-            `/system/bin/sh ` +
-            `${shellQuote(MANAGER)} status`
-        );
-
-    const running =
-        output.includes('STATUS=RUNNING');
-
-    const status =
-        $('status');
-
-    status.textContent =
-        running
-            ? '● 运行中'
-            : '● 已停止';
-
-    status.className =
-        'status ' +
-        (
-            running
-                ? 'running'
-                : 'stopped'
-        );
-
-    $('statusDetail').textContent =
-        output;
-};
-
-
-/*
- * 启动 / 停止 / 重启
- */
-window.action = async function (name) {
-
-    setButtonsDisabled(true);
-
-    showMessage(
-        `正在执行：${name}...`
-    );
-
-    try {
-
-        const output =
-            await run(
-                `/system/bin/sh ` +
-                `${shellQuote(MANAGER)} ` +
-                shellQuote(name)
-            );
-
-        showMessage(output);
-
-        await refreshStatus();
-
-    } finally {
-
-        setButtonsDisabled(false);
-
-    }
-};
-
-
-/*
- * 保存配置
- */
-window.saveConfig = async function (restart) {
-
-    setButtonsDisabled(true);
-
-    showMessage('正在保存配置...');
-
-    try {
-
-        const payload = [
-
-            `SERVER_ID=${$('serverId').value.trim()}`,
-            `SECRET=${$('secret').value}`,
-            `WORKER_URL=${$('workerUrl').value.trim()}`,
-
-            `COLLECT_INTERVAL=${$('collectInterval').value}`,
-            `REPORT_INTERVAL=${$('reportInterval').value}`,
-
-            `CT_NODE=${$('ctNode').value.trim()}`,
-            `CU_NODE=${$('cuNode').value.trim()}`,
-            `CM_NODE=${$('cmNode').value.trim()}`,
-            `BD_NODE=${$('bdNode').value.trim()}`,
-
-            `INTERFACE=${$('interface').value.trim()}`,
-
-            `RESET_DAY=${$('resetDay').value}`,
-
-            `CONNECTION_MODE=${$('connectionMode').value}`,
-
-            `AUTO_UPDATE=${$('autoUpdate').value}`,
-
-            `UPDATE_PROXY=${$('updateProxy').value.trim()}`,
-
-            `DEBUG=${$('debug').value}`
-
-        ].join('\n');
-
-
-        const encoded =
-            base64Utf8(payload);
-
-
-        const output =
-            await run(
-                `printf %s ${shellQuote(encoded)} ` +
-                `| /system/bin/sh ` +
-                `${shellQuote(SAVER)}`
-            );
-
-
-        if (!output.includes('OK')) {
-
-            showMessage(
-                '保存失败：\n' +
-                output
-            );
-
-            return;
-        }
-
-
-        if (restart) {
-
-            showMessage(
-                '配置保存成功，正在重启探针...'
-            );
-
-            const restartOutput =
-                await run(
-                    `/system/bin/sh ` +
-                    `${shellQuote(MANAGER)} restart`
-                );
-
-            showMessage(
-                '配置已保存并重启。\n\n' +
-                restartOutput
-            );
-
-        } else {
-
-            showMessage(
-                '配置保存成功。\n\n' +
-                '当前运行中的探针需要重启后才会读取新配置。'
-            );
-
-        }
-
-        await refreshStatus();
-
-    } finally {
-
-        setButtonsDisabled(false);
-
-    }
-};
-
-
-/*
- * 查看日志
- */
-window.showLogs = async function () {
-
-    const output =
-        await run(
-            `/system/bin/sh ` +
-            `${shellQuote(MANAGER)} logs`
-        );
-
-    $('logs').textContent =
-        output;
-};
-
-
-/*
- * 页面加载
- */
-document.addEventListener(
-    'DOMContentLoaded',
-    async function () {
-
-        await loadConfig();
-
-        await refreshStatus();
-
-    }
-);
-
-</script>
 </head>
 
 <body>
 
+<div class="card">
+
+    <h1>CF Server Monitor</h1>
+
+    <div id="apiStatus" class="warning">
+        正在初始化 KernelSU WebUI API...
+    </div>
+
+    <pre id="apiDetail" class="muted small"></pre>
+
+</div>
+
 
 <div class="card">
 
-    <h1>
-        CF Server Monitor
-    </h1>
+    <h2>运行状态</h2>
 
-    <div
-        id="status"
-        class="status"
-    >
+    <div id="status" class="status warning">
         正在检查...
     </div>
 
-    <pre
-        id="statusDetail"
-        class="muted"
-    ></pre>
+    <pre id="statusDetail" class="muted"></pre>
 
 </div>
 
 
 <div class="card">
 
-    <h2>
-        探针控制
-    </h2>
+    <h2>探针控制</h2>
 
     <div class="row">
 
-        <button
-            class="primary"
-            onclick="action('start')"
-        >
+        <button id="btnStart" class="primary">
             启动探针
         </button>
 
-        <button
-            onclick="action('stop')"
-        >
+        <button id="btnStop">
             停止探针
         </button>
 
-        <button
-            onclick="action('restart')"
-        >
+        <button id="btnRestart">
             重启探针
         </button>
 
-        <button
-            onclick="refreshStatus()"
-        >
+        <button id="btnStatus">
             刷新状态
+        </button>
+
+        <button id="btnDiagnose">
+            网络诊断
         </button>
 
     </div>
@@ -631,14 +185,9 @@ document.addEventListener(
 
 <div class="card">
 
-    <h2>
-        基础配置
-    </h2>
+    <h2>基础配置</h2>
 
-
-    <label>
-        Server ID
-    </label>
+    <label>Server ID</label>
 
     <input
         id="serverId"
@@ -646,9 +195,7 @@ document.addEventListener(
     >
 
 
-    <label>
-        Secret
-    </label>
+    <label>Secret</label>
 
     <input
         id="secret"
@@ -657,9 +204,7 @@ document.addEventListener(
     >
 
 
-    <label>
-        Worker URL
-    </label>
+    <label>Worker URL</label>
 
     <input
         id="workerUrl"
@@ -668,47 +213,40 @@ document.addEventListener(
     >
 
 
-    <label>
-        采集间隔（秒）
-    </label>
+    <label>采集间隔（秒）</label>
 
     <input
         id="collectInterval"
         type="number"
         min="0"
+        value="0"
     >
 
 
-    <label>
-        上报间隔（秒）
-    </label>
+    <label>上报间隔（秒）</label>
 
     <input
         id="reportInterval"
         type="number"
         min="1"
+        value="60"
     >
 
 
-    <label>
-        流量重置日（0-31）
-    </label>
+    <label>流量重置日（0-31）</label>
 
     <input
         id="resetDay"
         type="number"
         min="0"
         max="31"
+        value="1"
     >
 
 
-    <label>
-        连接模式
-    </label>
+    <label>连接模式</label>
 
-    <select
-        id="connectionMode"
-    >
+    <select id="connectionMode">
 
         <option value="auto">
             auto
@@ -725,64 +263,39 @@ document.addEventListener(
 
 <div class="card">
 
-    <h2>
-        高级配置
-    </h2>
+    <h2>高级配置</h2>
+
+    <label>CT Node</label>
+
+    <input id="ctNode">
 
 
-    <label>
-        CT Node
-    </label>
+    <label>CU Node</label>
 
-    <input
-        id="ctNode"
-    >
+    <input id="cuNode">
 
 
-    <label>
-        CU Node
-    </label>
+    <label>CM Node</label>
 
-    <input
-        id="cuNode"
-    >
+    <input id="cmNode">
 
 
-    <label>
-        CM Node
-    </label>
+    <label>BD Node</label>
 
-    <input
-        id="cmNode"
-    >
+    <input id="bdNode">
 
 
-    <label>
-        BD Node
-    </label>
-
-    <input
-        id="bdNode"
-    >
-
-
-    <label>
-        Interface
-    </label>
+    <label>Interface</label>
 
     <input
         id="interface"
-        placeholder="例如：wlan0"
+        placeholder="例如 wlan0；留空自动汇总"
     >
 
 
-    <label>
-        Agent 自动更新
-    </label>
+    <label>Agent 自动更新</label>
 
-    <select
-        id="autoUpdate"
-    >
+    <select id="autoUpdate">
 
         <option value="0">
             关闭
@@ -795,50 +308,27 @@ document.addEventListener(
     </select>
 
 
-    <label>
-        更新代理
-    </label>
+    <label>更新代理</label>
 
     <input
         id="updateProxy"
         placeholder="可留空"
     >
-    <label>
-        调试日志
-    </label>
 
-    <select id="debug">
-
-        <option value="0">
-            关闭
-        </option>
-
-        <option value="1">
-            开启
-        </option>
-
-    </select>
 </div>
 
 
 <div class="card">
 
-    <h2>
-        保存
-    </h2>
+    <h2>保存配置</h2>
 
     <div class="row">
 
-        <button
-            onclick="saveConfig(false)"
-        >
+        <button id="btnSave">
             保存配置
         </button>
 
-        <button
-            class="primary"
-            onclick="saveConfig(true)"
-        >
+        <button id="btnSaveRestart" class="primary">
             保存并重启
         </button>
 
@@ -849,37 +339,713 @@ document.addEventListener(
 
 <div class="card">
 
-    <h2>
-        日志
-    </h2>
+    <h2>日志</h2>
 
     <div class="row">
 
-        <button
-            onclick="showLogs()"
-        >
+        <button id="btnLogs">
             刷新日志
         </button>
 
     </div>
 
-    <pre id="logs">
-点击“刷新日志”查看最近 100 行。
-    </pre>
+    <pre id="logs">点击“刷新日志”查看日志。</pre>
 
 </div>
 
 
 <div class="card">
 
-    <h2>
-        操作结果
-    </h2>
+    <h2>操作结果</h2>
 
     <pre id="message"></pre>
 
 </div>
 
+
+<script type="module">
+
+(async function () {
+
+    const MODDIR =
+        '/data/adb/modules/cf-server-monitor';
+
+    const MANAGER =
+        MODDIR + '/scripts/manager.sh';
+
+    const SAVER =
+        MODDIR + '/scripts/save-config.sh';
+
+    const CONFIG =
+        '/data/adb/cf-server-monitor/config.conf';
+
+
+    function $(id) {
+        return document.getElementById(id);
+    }
+
+
+    function setApiStatus(text, type) {
+
+        const el = $('apiStatus');
+
+        el.textContent = text;
+
+        el.className = type || '';
+
+    }
+
+
+    function showMessage(text) {
+
+        $('message').textContent =
+            String(text || '');
+
+    }
+
+
+    function setButtonsDisabled(disabled) {
+
+        document
+            .querySelectorAll('button')
+            .forEach(function (button) {
+
+                button.disabled = disabled;
+
+            });
+
+    }
+
+
+    function shellQuote(value) {
+
+        return "'" +
+            String(value)
+                .replace(
+                    /'/g,
+                    "'\\''"
+                ) +
+            "'";
+
+    }
+
+
+    function parseConfig(text) {
+
+        const result = {};
+
+        const lines =
+            String(text || '')
+                .split(/\r?\n/);
+
+        for (const line of lines) {
+
+            const trimmed =
+                line.trim();
+
+            if (
+                !trimmed ||
+                trimmed.startsWith('#')
+            ) {
+                continue;
+            }
+
+            const index =
+                trimmed.indexOf('=');
+
+            if (index < 0) {
+                continue;
+            }
+
+            const key =
+                trimmed
+                    .substring(0, index)
+                    .trim();
+
+            let value =
+                trimmed
+                    .substring(index + 1)
+                    .trim();
+
+            if (
+                value.length >= 2 &&
+                value.startsWith('"') &&
+                value.endsWith('"')
+            ) {
+
+                value =
+                    value.substring(
+                        1,
+                        value.length - 1
+                    );
+
+            }
+
+            value =
+                value.replace(
+                    /\\"/g,
+                    '"'
+                );
+
+            value =
+                value.replace(
+                    /\\\\/g,
+                    '\\'
+                );
+
+            result[key] = value;
+
+        }
+
+        return result;
+
+    }
+
+
+    function base64Utf8(text) {
+
+        const bytes =
+            new TextEncoder()
+                .encode(text);
+
+        let binary = '';
+
+        for (const byte of bytes) {
+
+            binary +=
+                String.fromCharCode(byte);
+
+        }
+
+        return btoa(binary);
+
+    }
+
+
+    /*
+     * 这里使用动态 import。
+     *
+     * 如果当前 KernelSU Manager 不支持
+     * kernelsu JS API，不会导致整个页面静默失效，
+     * 而是会直接在顶部显示具体错误。
+     */
+    let exec;
+
+    try {
+
+        const kernelsu =
+            await import('kernelsu');
+
+        exec =
+            kernelsu.exec;
+
+        if (
+            typeof exec !== 'function'
+        ) {
+
+            throw new Error(
+                'kernelsu.exec is not available'
+            );
+
+        }
+
+        setApiStatus(
+            '● KernelSU WebUI API 已加载',
+            'ok'
+        );
+
+    } catch (error) {
+
+        const message =
+            error?.stack ||
+            error?.message ||
+            String(error);
+
+        setApiStatus(
+            '● KernelSU WebUI API 加载失败',
+            'error'
+        );
+
+        $('apiDetail').textContent =
+            message;
+
+        showMessage(
+            'WebUI 无法执行 Root Shell。\n\n' +
+            '错误：\n' +
+            message
+        );
+
+        return;
+
+    }
+
+
+    async function run(command) {
+
+        try {
+
+            const result =
+                await exec(command);
+
+            const stdout =
+                result?.stdout || '';
+
+            const stderr =
+                result?.stderr || '';
+
+            const errno =
+                result?.errno ?? 0;
+
+            let output =
+                [
+                    stdout,
+                    stderr
+                ]
+                    .filter(Boolean)
+                    .join('\n')
+                    .trim();
+
+            if (errno !== 0) {
+
+                output =
+                    'ERROR errno=' +
+                    errno +
+                    '\n' +
+                    output;
+
+            }
+
+            return {
+                errno: errno,
+                stdout: stdout,
+                stderr: stderr,
+                output: output || 'OK'
+            };
+
+        } catch (error) {
+
+            return {
+                errno: -1,
+                stdout: '',
+                stderr: '',
+                output:
+                    'ERROR: ' +
+                    (
+                        error?.stack ||
+                        error?.message ||
+                        String(error)
+                    )
+            };
+
+        }
+
+    }
+
+
+    async function refreshStatus() {
+
+        const result =
+            await run(
+                '/system/bin/sh ' +
+                shellQuote(MANAGER) +
+                ' status'
+            );
+
+        const output =
+            result.output;
+
+        const running =
+            result.errno === 0 &&
+            output.includes(
+                'STATUS=RUNNING'
+            );
+
+        const status =
+            $('status');
+
+        if (running) {
+
+            status.textContent =
+                '● 运行中';
+
+            status.className =
+                'status running';
+
+        } else {
+
+            status.textContent =
+                '● 已停止';
+
+            status.className =
+                'status stopped';
+
+        }
+
+        $('statusDetail').textContent =
+            output;
+
+    }
+
+
+    async function loadConfig() {
+
+        const result =
+            await run(
+                'cat ' +
+                shellQuote(CONFIG) +
+                ' 2>/dev/null'
+            );
+
+        if (
+            result.errno !== 0 ||
+            result.output === 'OK' ||
+            result.output.startsWith('ERROR')
+        ) {
+
+            showMessage(
+                '尚未读取到配置文件。\n' +
+                '可以填写配置后直接保存。'
+            );
+
+            return;
+
+        }
+
+        const config =
+            parseConfig(
+                result.stdout
+            );
+
+        $('serverId').value =
+            config.SERVER_ID || '';
+
+        $('secret').value =
+            config.SECRET || '';
+
+        $('workerUrl').value =
+            config.WORKER_URL || '';
+
+        $('collectInterval').value =
+            config.COLLECT_INTERVAL || '0';
+
+        $('reportInterval').value =
+            config.REPORT_INTERVAL || '60';
+
+        $('resetDay').value =
+            config.RESET_DAY || '1';
+
+        $('connectionMode').value =
+            config.CONNECTION_MODE || 'auto';
+
+        $('ctNode').value =
+            config.CT_NODE || '';
+
+        $('cuNode').value =
+            config.CU_NODE || '';
+
+        $('cmNode').value =
+            config.CM_NODE || '';
+
+        $('bdNode').value =
+            config.BD_NODE || '';
+
+        $('interface').value =
+            config.INTERFACE || '';
+
+        $('autoUpdate').value =
+            config.AUTO_UPDATE || '0';
+
+        $('updateProxy').value =
+            config.UPDATE_PROXY || '';
+
+    }
+
+
+    async function doAction(name) {
+
+        setButtonsDisabled(true);
+
+        showMessage(
+            '正在执行：' +
+            name +
+            ' ...'
+        );
+
+        try {
+
+            const result =
+                await run(
+                    '/system/bin/sh ' +
+                    shellQuote(MANAGER) +
+                    ' ' +
+                    shellQuote(name)
+                );
+
+            showMessage(
+                result.output
+            );
+
+            await refreshStatus();
+
+        } finally {
+
+            setButtonsDisabled(false);
+
+        }
+
+    }
+
+
+    async function saveConfig(restart) {
+
+        const payload = [
+
+            'SERVER_ID=' +
+            $('serverId').value.trim(),
+
+            'SECRET=' +
+            $('secret').value,
+
+            'WORKER_URL=' +
+            $('workerUrl').value.trim(),
+
+            'COLLECT_INTERVAL=' +
+            $('collectInterval').value,
+
+            'REPORT_INTERVAL=' +
+            $('reportInterval').value,
+
+            'CT_NODE=' +
+            $('ctNode').value.trim(),
+
+            'CU_NODE=' +
+            $('cuNode').value.trim(),
+
+            'CM_NODE=' +
+            $('cmNode').value.trim(),
+
+            'BD_NODE=' +
+            $('bdNode').value.trim(),
+
+            'INTERFACE=' +
+            $('interface').value.trim(),
+
+            'RESET_DAY=' +
+            $('resetDay').value,
+
+            'CONNECTION_MODE=' +
+            $('connectionMode').value,
+
+            'AUTO_UPDATE=' +
+            $('autoUpdate').value,
+
+            'UPDATE_PROXY=' +
+            $('updateProxy').value.trim()
+
+        ].join('\n');
+
+
+        setButtonsDisabled(true);
+
+        showMessage(
+            '正在保存配置...'
+        );
+
+        try {
+
+            const encoded =
+                base64Utf8(payload);
+
+            const result =
+                await run(
+                    'printf %s ' +
+                    shellQuote(encoded) +
+                    ' | /system/bin/sh ' +
+                    shellQuote(SAVER)
+                );
+
+            if (
+                result.errno !== 0 ||
+                !result.output.includes('OK')
+            ) {
+
+                showMessage(
+                    '保存失败：\n' +
+                    result.output
+                );
+
+                return;
+
+            }
+
+            if (!restart) {
+
+                showMessage(
+                    '配置保存成功。\n' +
+                    '需要点击“重启探针”后新配置才会生效。'
+                );
+
+                return;
+
+            }
+
+            const restartResult =
+                await run(
+                    '/system/bin/sh ' +
+                    shellQuote(MANAGER) +
+                    ' restart'
+                );
+
+            showMessage(
+                '配置保存成功，重启结果：\n\n' +
+                restartResult.output
+            );
+
+            await refreshStatus();
+
+        } finally {
+
+            setButtonsDisabled(false);
+
+        }
+
+    }
+
+
+    async function showLogs() {
+
+        const result =
+            await run(
+                '/system/bin/sh ' +
+                shellQuote(MANAGER) +
+                ' logs'
+            );
+
+        $('logs').textContent =
+            result.output;
+
+    }
+
+
+    async function diagnose() {
+
+        setButtonsDisabled(true);
+
+        showMessage(
+            '正在执行诊断...'
+        );
+
+        try {
+
+            const result =
+                await run(
+                    '/system/bin/sh ' +
+                    shellQuote(MANAGER) +
+                    ' diagnose'
+                );
+
+            showMessage(
+                result.output
+            );
+
+        } finally {
+
+            setButtonsDisabled(false);
+
+        }
+
+    }
+
+
+    /*
+     * 不再使用 HTML 内联 onclick。
+     *
+     * 所有事件统一在这里绑定。
+     */
+    $('btnStart')
+        .addEventListener(
+            'click',
+            function () {
+                doAction('start');
+            }
+        );
+
+    $('btnStop')
+        .addEventListener(
+            'click',
+            function () {
+                doAction('stop');
+            }
+        );
+
+    $('btnRestart')
+        .addEventListener(
+            'click',
+            function () {
+                doAction('restart');
+            }
+        );
+
+    $('btnStatus')
+        .addEventListener(
+            'click',
+            function () {
+                refreshStatus();
+            }
+        );
+
+    $('btnDiagnose')
+        .addEventListener(
+            'click',
+            function () {
+                diagnose();
+            }
+        );
+
+    $('btnSave')
+        .addEventListener(
+            'click',
+            function () {
+                saveConfig(false);
+            }
+        );
+
+    $('btnSaveRestart')
+        .addEventListener(
+            'click',
+            function () {
+                saveConfig(true);
+            }
+        );
+
+    $('btnLogs')
+        .addEventListener(
+            'click',
+            function () {
+                showLogs();
+            }
+        );
+
+
+    /*
+     * API 自检。
+     *
+     * 如果这里失败，页面顶部和操作结果都会直接显示，
+     * 不会再出现“按钮点了完全没反应”。
+     */
+    const apiTest =
+        await run('id');
+
+    $('apiDetail').textContent =
+        apiTest.output;
+
+
+    await loadConfig();
+
+    await refreshStatus();
+
+})();
+</script>
 
 </body>
 </html>
