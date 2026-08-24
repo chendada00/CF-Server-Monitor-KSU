@@ -76,9 +76,29 @@ start() {
     # 不要在这里传 -id -secret -url，
     # 这些参数属于 cf-probe install。
 
-    nohup "$BIN" run \
-        -config="$CONFIG" \
-        >> "$LOGFILE" 2>&1 < /dev/null &
+    DEBUG="0"
+
+    if [ -f "$CONFIG" ]; then
+        DEBUG="$(sed -n 's/^DEBUG="\{0,1\}\([^"]*\).*/\1/p' "$CONFIG" | head -n 1)"
+
+        [ -n "$DEBUG" ] || DEBUG="0"
+    fi
+
+
+    if [ "$DEBUG" = "1" ]; then
+
+        nohup "$BIN" run \
+            -config="$CONFIG" \
+            -debug=1 \
+            >> "$LOGFILE" 2>&1 < /dev/null &
+
+    else
+
+        nohup "$BIN" run \
+            -config="$CONFIG" \
+            >> "$LOGFILE" 2>&1 < /dev/null &
+
+    fi
 
     PID=$!
 

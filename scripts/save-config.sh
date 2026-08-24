@@ -36,6 +36,7 @@ CONNECTION_MODE="auto"
 
 AUTO_UPDATE="0"
 UPDATE_PROXY=""
+DEBUG="0"
 
 while IFS='=' read -r KEY VALUE; do
     case "$KEY" in
@@ -93,6 +94,9 @@ while IFS='=' read -r KEY VALUE; do
 
         UPDATE_PROXY)
             UPDATE_PROXY="$VALUE"
+            ;;
+        DEBUG)
+            DEBUG="$VALUE"
             ;;
     esac
 done <<EOF
@@ -168,7 +172,14 @@ case "$AUTO_UPDATE" in
         exit 1
         ;;
 esac
-
+case "$DEBUG" in
+    0|1)
+        ;;
+    *)
+        echo "ERROR: DEBUG must be 0 or 1"
+        exit 1
+        ;;
+esac
 escape_value() {
     printf '%s' "$1" | sed 's/[\\"]/\\&/g'
 }
@@ -196,7 +207,7 @@ escape_value() {
 
     printf 'AUTO_UPDATE="%s"\n' "$AUTO_UPDATE"
     printf 'UPDATE_PROXY="%s"\n' "$(escape_value "$UPDATE_PROXY")"
-
+    printf 'DEBUG="%s"\n' "$DEBUG"
     printf 'CONFIG_MD5="none"\n'
 } > "$TMP"
 

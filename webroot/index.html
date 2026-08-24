@@ -161,20 +161,12 @@ function shellQuote(value) {
 }
 
 
-/*
- * KernelSU exec 返回：
- *
- * {
- *   errno,
- *   stdout,
- *   stderr
- * }
- */
-function run(command) {
+async function run(command) {
 
     try {
 
-        const result = exec(command);
+        const result =
+            await exec(command);
 
         const stdout =
             result?.stdout || '';
@@ -215,9 +207,7 @@ function run(command) {
 
 
 function showMessage(text) {
-
     $('message').textContent = text;
-
 }
 
 
@@ -226,9 +216,7 @@ function setButtonsDisabled(disabled) {
     document
         .querySelectorAll('button')
         .forEach(button => {
-
             button.disabled = disabled;
-
         });
 }
 
@@ -237,9 +225,7 @@ function parseConfig(text) {
 
     const result = {};
 
-    for (
-        const line of text.split(/\r?\n/)
-    ) {
+    for (const line of text.split(/\r?\n/)) {
 
         const trimmed = line.trim();
 
@@ -295,6 +281,9 @@ function parseConfig(text) {
 }
 
 
+/*
+ * UTF-8 -> Base64
+ */
 function base64Utf8(text) {
 
     const bytes =
@@ -304,10 +293,7 @@ function base64Utf8(text) {
     let binary = '';
 
     for (const byte of bytes) {
-
-        binary +=
-            String.fromCharCode(byte);
-
+        binary += String.fromCharCode(byte);
     }
 
     return btoa(binary);
@@ -317,17 +303,17 @@ function base64Utf8(text) {
 /*
  * 加载配置
  */
-window.loadConfig = function () {
+window.loadConfig = async function () {
 
     const output =
-        run(
+        await run(
             `cat ${shellQuote(CONFIG)} 2>/dev/null`
         );
 
-    if (
-        output.startsWith('ERROR')
-    ) {
-
+    if (output.startsWith('ERROR')) {
+        showMessage(
+            '配置尚未创建，请填写后保存。'
+        );
         return;
     }
 
@@ -375,16 +361,20 @@ window.loadConfig = function () {
 
     $('updateProxy').value =
         config.UPDATE_PROXY || '';
+    $('debug').value =
+        config.DEBUG || '0';
+
+    showMessage('配置加载完成。');
 };
 
 
 /*
- * 刷新运行状态
+ * 刷新状态
  */
-window.refreshStatus = function () {
+window.refreshStatus = async function () {
 
     const output =
-        run(
+        await run(
             `/system/bin/sh ` +
             `${shellQuote(MANAGER)} status`
         );
@@ -414,9 +404,9 @@ window.refreshStatus = function () {
 
 
 /*
- * 启动/停止/重启
+ * 启动 / 停止 / 重启
  */
-window.action = function (name) {
+window.action = async function (name) {
 
     setButtonsDisabled(true);
 
@@ -424,126 +414,139 @@ window.action = function (name) {
         `正在执行：${name}...`
     );
 
-    const output =
-        run(
-            `/system/bin/sh ` +
-            `${shellQuote(MANAGER)} ` +
-            shellQuote(name)
-        );
+    try {
 
-    showMessage(output);
+        const output =
+            await run(
+                `/system/bin/sh ` +
+                `${shellQuote(MANAGER)} ` +
+                shellQuote(name)
+            );
 
-    refreshStatus();
+        showMessage(output);
 
-    setButtonsDisabled(false);
+        await refreshStatus();
+
+    } finally {
+
+        setButtonsDisabled(false);
+
+    }
 };
 
 
 /*
  * 保存配置
  */
-window.saveConfig = function (restart) {
+window.saveConfig = async function (restart) {
 
     setButtonsDisabled(true);
 
     showMessage('正在保存配置...');
 
-    const payload = [
+    try {
 
-        `SERVER_ID=${$('serverId').value}`,
-        `SECRET=${$('secret').value}`,
-        `WORKER_URL=${$('workerUrl').value}`,
+        const payload = [
 
-        `COLLECT_INTERVAL=${$('collectInterval').value}`,
-        `REPORT_INTERVAL=${$('reportInterval').value}`,
+            `SERVER_ID=${$('serverId').value.trim()}`,
+            `SECRET=${$('secret').value}`,
+            `WORKER_URL=${$('workerUrl').value.trim()}`,
 
-        `CT_NODE=${$('ctNode').value}`,
-        `CU_NODE=${$('cuNode').value}`,
-        `CM_NODE=${$('cmNode').value}`,
-        `BD_NODE=${$('bdNode').value}`,
+            `COLLECT_INTERVAL=${$('collectInterval').value}`,
+            `REPORT_INTERVAL=${$('reportInterval').value}`,
 
-        `INTERFACE=${$('interface').value}`,
+            `CT_NODE=${$('ctNode').value.trim()}`,
+            `CU_NODE=${$('cuNode').value.trim()}`,
+            `CM_NODE=${$('cmNode').value.trim()}`,
+            `BD_NODE=${$('bdNode').value.trim()}`,
 
-        `RESET_DAY=${$('resetDay').value}`,
+            `INTERFACE=${$('interface').value.trim()}`,
 
-        `CONNECTION_MODE=${$('connectionMode').value}`,
+            `RESET_DAY=${$('resetDay').value}`,
 
-        `AUTO_UPDATE=${$('autoUpdate').value}`,
+            `CONNECTION_MODE=${$('connectionMode').value}`,
 
-        `UPDATE_PROXY=${$('updateProxy').value}`
+            `AUTO_UPDATE=${$('autoUpdate').value}`,
 
-    ].join('\n');
+            `UPDATE_PROXY=${$('updateProxy').value.trim()}`,
 
+            `DEBUG=${$('debug').value}`
 
-    const encoded =
-        base64Utf8(payload);
-
-
-    const output =
-        run(
-            `printf %s ${shellQuote(encoded)} ` +
-            `| /system/bin/sh ` +
-            `${shellQuote(SAVER)}`
-        );
+        ].join('\n');
 
 
-    if (!output.includes('OK')) {
+        const encoded =
+            base64Utf8(payload);
 
-        showMessage(
-            '保存失败：\n' +
-            output
-        );
+
+        const output =
+            await run(
+                `printf %s ${shellQuote(encoded)} ` +
+                `| /system/bin/sh ` +
+                `${shellQuote(SAVER)}`
+            );
+
+
+        if (!output.includes('OK')) {
+
+            showMessage(
+                '保存失败：\n' +
+                output
+            );
+
+            return;
+        }
+
+
+        if (restart) {
+
+            showMessage(
+                '配置保存成功，正在重启探针...'
+            );
+
+            const restartOutput =
+                await run(
+                    `/system/bin/sh ` +
+                    `${shellQuote(MANAGER)} restart`
+                );
+
+            showMessage(
+                '配置已保存并重启。\n\n' +
+                restartOutput
+            );
+
+        } else {
+
+            showMessage(
+                '配置保存成功。\n\n' +
+                '当前运行中的探针需要重启后才会读取新配置。'
+            );
+
+        }
+
+        await refreshStatus();
+
+    } finally {
 
         setButtonsDisabled(false);
 
-        return;
     }
-
-
-    if (restart) {
-
-        const restartOutput =
-            run(
-                `/system/bin/sh ` +
-                `${shellQuote(MANAGER)} restart`
-            );
-
-        showMessage(
-            '配置已保存并重启。\n\n' +
-            restartOutput
-        );
-
-    } else {
-
-        showMessage(
-            '配置保存成功。\n\n' +
-            '提示：当前运行中的探针不会立即读取新配置。' +
-            '需要点击“重启探针”或“保存并重启”。'
-        );
-
-    }
-
-
-    refreshStatus();
-
-    setButtonsDisabled(false);
 };
 
 
 /*
  * 查看日志
  */
-window.showLogs = function () {
+window.showLogs = async function () {
 
     const output =
-        run(
+        await run(
             `/system/bin/sh ` +
             `${shellQuote(MANAGER)} logs`
         );
 
     $('logs').textContent =
         output;
-
 };
 
 
@@ -552,17 +555,16 @@ window.showLogs = function () {
  */
 document.addEventListener(
     'DOMContentLoaded',
-    function () {
+    async function () {
 
-        loadConfig();
+        await loadConfig();
 
-        refreshStatus();
+        await refreshStatus();
 
     }
 );
 
 </script>
-
 </head>
 
 <body>
@@ -801,7 +803,21 @@ document.addEventListener(
         id="updateProxy"
         placeholder="可留空"
     >
+    <label>
+        调试日志
+    </label>
 
+    <select id="debug">
+
+        <option value="0">
+            关闭
+        </option>
+
+        <option value="1">
+            开启
+        </option>
+
+    </select>
 </div>
 
 
