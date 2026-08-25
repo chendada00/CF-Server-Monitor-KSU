@@ -18,6 +18,16 @@ KSU_BUSYBOX="/data/adb/ksu/bin/busybox"
 # Android/KSU 环境下 /etc/resolv.conf 可能指向 [::1]:53，
 # 但手机上通常没有本地 DNS 服务，因此会导致所有域名解析失败。
 CF_PROBE_UPDATE_DNS_SERVER="223.5.5.5"
+
+# Android 系统 CA 证书目录。
+if [ -d "/apex/com.android.conscrypt/cacerts" ]; then
+    SSL_CERT_DIR="/apex/com.android.conscrypt/cacerts"
+elif [ -d "/system/etc/security/cacerts" ]; then
+    SSL_CERT_DIR="/system/etc/security/cacerts"
+else
+    SSL_CERT_DIR=""
+fi
+
 mkdir -p "$DATA_DIR"
 
 
@@ -318,9 +328,17 @@ start() {
     {
         echo "[MANAGER] SERVER_ID=$SERVER_ID"
         echo "[MANAGER] WORKER_URL=$WORKER_URL"
-        echo "[MANAGER] DEBUG=1"
-        echo "[MANAGER] CF_PROBE_UPDATE_DNS=$CF_PROBE_UPDATE_DNS_SERVER"
-        echo "[MANAGER] Starting probe..."
+    echo "[MANAGER] DEBUG=1"
+    echo "[MANAGER] CF_PROBE_UPDATE_DNS=$CF_PROBE_UPDATE_DNS_SERVER"
+    echo "[MANAGER] SSL_CERT_DIR=$SSL_CERT_DIR"
+
+    if [ -n "$SSL_CERT_DIR" ]; then
+        echo "[MANAGER] CA certificate files=$(ls "$SSL_CERT_DIR" 2>/dev/null | wc -l)"
+    else
+        echo "[MANAGER] WARNING: Android CA certificate directory not found"
+    fi
+
+    echo "[MANAGER] Starting probe..."
     } >> "$LOGFILE"
 
 
@@ -332,6 +350,7 @@ start() {
     if [ -x "$KSU_BUSYBOX" ]; then
 
         CF_PROBE_UPDATE_DNS="$CF_PROBE_UPDATE_DNS_SERVER" \
+        SSL_CERT_DIR="$SSL_CERT_DIR" \
             "$KSU_BUSYBOX" setsid \
             "$BIN" run \
             -config="$CONFIG" \
@@ -341,6 +360,7 @@ start() {
     else
 
         CF_PROBE_UPDATE_DNS="$CF_PROBE_UPDATE_DNS_SERVER" \
+        SSL_CERT_DIR="$SSL_CERT_DIR" \
             nohup \
             "$BIN" run \
             -config="$CONFIG" \
