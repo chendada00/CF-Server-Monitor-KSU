@@ -11,6 +11,7 @@
 
 <title>CF Server Monitor</title>
 
+
 <style>
 
 :root {
@@ -38,8 +39,11 @@ body {
 
 .card {
     background: #1d1d1f;
+
     border-radius: 16px;
+
     padding: 16px;
+
     margin-bottom: 14px;
 }
 
@@ -58,16 +62,21 @@ h2 {
 
 .row {
     display: flex;
+
     gap: 8px;
+
     flex-wrap: wrap;
 }
 
 button {
     border: 0;
+
     border-radius: 10px;
+
     padding: 11px 14px;
 
     background: #3a3a3c;
+
     color: #fff;
 
     font-size: 15px;
@@ -82,7 +91,7 @@ button.danger {
 }
 
 button:disabled {
-    opacity: .5;
+    opacity: .45;
 }
 
 input,
@@ -92,9 +101,11 @@ select {
     padding: 12px;
 
     border: 1px solid #444;
+
     border-radius: 10px;
 
     background: #2c2c2e;
+
     color: #fff;
 
     font-size: 16px;
@@ -102,14 +113,17 @@ select {
 
 label {
     display: block;
+
     margin: 12px 0 6px;
 }
 
 pre {
     white-space: pre-wrap;
+
     word-break: break-word;
 
     max-height: 420px;
+
     overflow: auto;
 
     margin: 0;
@@ -117,6 +131,7 @@ pre {
 
 .badge {
     font-weight: 700;
+
     font-size: 16px;
 }
 
@@ -130,12 +145,15 @@ pre {
 
 .muted {
     color: #aaa;
+
     font-size: 13px;
 }
 
 .small {
     color: #aaa;
+
     font-size: 12px;
+
     margin-top: 6px;
 }
 
@@ -145,10 +163,13 @@ pre {
 
 .switch-row {
     display: flex;
+
     align-items: center;
+
     justify-content: space-between;
 
     gap: 12px;
+
     margin-top: 12px;
 }
 
@@ -158,15 +179,19 @@ pre {
 
 .switch {
     width: 52px;
+
     height: 30px;
 
     position: relative;
+
     appearance: none;
 
     background: #555;
+
     border-radius: 20px;
 
     cursor: pointer;
+
     transition: .2s;
 }
 
@@ -180,12 +205,15 @@ pre {
     position: absolute;
 
     width: 24px;
+
     height: 24px;
 
     top: 3px;
+
     left: 3px;
 
     background: #fff;
+
     border-radius: 50%;
 
     transition: .2s;
@@ -197,6 +225,7 @@ pre {
 
 #loadingOverlay {
     position: fixed;
+
     inset: 0;
 
     z-index: 9999;
@@ -204,11 +233,12 @@ pre {
     display: none;
 
     align-items: center;
+
     justify-content: center;
 
     padding: 24px;
 
-    background: rgba(0, 0, 0, .72);
+    background: rgba(0,0,0,.72);
 
     backdrop-filter: blur(5px);
 }
@@ -219,7 +249,8 @@ pre {
 
 .loadingBox {
     width: 100%;
-    max-width: 330px;
+
+    max-width: 340px;
 
     padding: 24px;
 
@@ -232,6 +263,7 @@ pre {
 
 .spinner {
     width: 42px;
+
     height: 42px;
 
     margin: 0 auto 16px;
@@ -247,6 +279,7 @@ pre {
 
 #loadingText {
     font-size: 16px;
+
     font-weight: 600;
 }
 
@@ -270,7 +303,14 @@ pre {
 
 </style>
 
+
 <script type="module">
+
+import {
+    exec,
+    toast
+} from './kernelsu.js';
+
 
 const MODDIR =
     '/data/adb/modules/cf-server-monitor';
@@ -280,53 +320,18 @@ const MANAGER =
     `${MODDIR}/scripts/manager.sh`;
 
 
-const CONFIG =
-    '/data/adb/cf-server-monitor/config.conf';
-
-
-const SAVER =
-    `${MODDIR}/scripts/save-config.sh`;
-
-
-const ACTION_LOG =
-    '/data/adb/cf-server-monitor/webui-action.log';
-
-
 const $ =
     id => document.getElementById(id);
 
 
-let exec;
+let initialized = false;
+
+let statusTimer = null;
+
+let busy = false;
 
 
-try {
-
-    const kernelsu =
-        await import('./kernelsu.js');
-
-
-    exec =
-        kernelsu.exec;
-
-
-    if (
-        typeof exec !== 'function'
-    ) {
-
-        throw new Error(
-            'KernelSU exec API 不可用'
-        );
-    }
-
-} catch (error) {
-
-    window.__ksuInitError =
-        error;
-
-}
-
-
-function shellQuote(value) {
+function quote(value) {
 
     return "'" +
         String(value)
@@ -340,190 +345,97 @@ function shellQuote(value) {
 
 async function run(command) {
 
-    if (
-        typeof exec !== 'function'
-    ) {
+    let result;
+
+    try {
+
+        result =
+            await exec(command);
+
+    } catch (error) {
 
         throw new Error(
-            window.__ksuInitError?.message ||
-            'KernelSU WebUI API 不可用'
+            error?.message ||
+            String(error)
         );
     }
-
-
-    const result =
-        await exec(command);
 
 
     const stdout =
         result?.stdout || '';
 
-
     const stderr =
         result?.stderr || '';
 
+    const errno =
+        Number(
+            result?.errno ?? 0
+        );
+
+
+    const output =
+        [
+            stdout,
+            stderr
+        ]
+        .filter(
+            value =>
+                value !== ''
+        )
+        .join('\n')
+        .trim();
+
 
     return {
-
-        errno:
-            result?.errno ?? 0,
-
+        errno,
         stdout,
-
         stderr,
-
-        output:
-            [stdout, stderr]
-                .filter(Boolean)
-                .join('\n')
-                .trim()
-
+        output
     };
 }
 
 
-/*
- * 同时支持：
- *
- * SERVER_ID="123"
- *
- * SERVER_ID=123
- */
-function parseConfig(text) {
-
-    const result = {};
-
-
-    for (
-        const line of
-        String(text || '')
-            .split(/\r?\n/)
-    ) {
-
-        const trimmed =
-            line.trim();
-
-
-        if (
-            !trimmed ||
-            trimmed.startsWith('#')
-        ) {
-            continue;
-        }
-
-
-        const match =
-            trimmed.match(
-                /^([A-Z_]+)=(.*)$/
-            );
-
-
-        if (!match) {
-            continue;
-        }
-
-
-        let value =
-            match[2].trim();
-
-
-        if (
-            value.length >= 2 &&
-            value.startsWith('"') &&
-            value.endsWith('"')
-        ) {
-
-            value =
-                value.substring(
-                    1,
-                    value.length - 1
-                );
-        }
-
-
-        value =
-            value.replace(
-                /\\(["\\$`])/g,
-                '$1'
-            );
-
-
-        result[match[1]] =
-            value;
-    }
-
-
-    return result;
-}
-
-
-function b64Utf8(text) {
-
-    const bytes =
-        new TextEncoder()
-            .encode(text);
-
-
-    let binary = '';
-
-
-    for (
-        const byte of bytes
-    ) {
-
-        binary +=
-            String.fromCharCode(byte);
-    }
-
-
-    return btoa(binary);
-}
-
-
-function setMessage(text) {
+function setMessage(
+    message
+) {
 
     $('message').textContent =
-        text || '';
+        message || '';
 }
 
 
-function showLoading(
-    text,
+function loading(
+    show,
+    title,
     detail
 ) {
 
-    $('loadingText').textContent =
-        text ||
-        '正在执行操作...';
+    if (show) {
 
+        $('loadingText')
+            .textContent =
+                title ||
+                '正在执行...';
 
-    $('loadingDetail').textContent =
-        detail ||
-        '请稍候...';
+        $('loadingDetail')
+            .textContent =
+                detail ||
+                '请稍候...';
 
+        $('loadingOverlay')
+            .classList
+            .add('show');
 
-    $('loadingOverlay')
-        .classList
-        .add('show');
+    } else {
+
+        $('loadingOverlay')
+            .classList
+            .remove('show');
+    }
 }
 
 
-function hideLoading() {
-
-    $('loadingOverlay')
-        .classList
-        .remove('show');
-}
-
-
-function updateLoading(text) {
-
-    $('loadingDetail').textContent =
-        text || '';
-}
-
-
-function setButtonsDisabled(
+function disableButtons(
     disabled
 ) {
 
@@ -539,60 +451,92 @@ function setButtonsDisabled(
 }
 
 
-async function refreshStatus() {
+function parseKeyValue(
+    text
+) {
 
-    try {
-
-        const result =
-            await run(
-                `${shellQuote(MANAGER)} status`
-            );
+    const data = {};
 
 
-        const output =
-            result.output;
+    String(text || '')
+        .split(/\r?\n/)
+        .forEach(
+            line => {
+
+                const index =
+                    line.indexOf('=');
 
 
-        const running =
-            /运行状态：运行中/
-                .test(output);
+                if (index <= 0) {
+                    return;
+                }
 
 
-        $('status').textContent =
-            running
-                ? '● 探针运行中'
-                : '● 探针已停止';
+                const key =
+                    line
+                        .substring(
+                            0,
+                            index
+                        )
+                        .trim();
 
 
-        $('status').className =
-            'badge ' +
-            (
-                running
-                    ? 'running'
-                    : 'stopped'
-            );
+                let value =
+                    line
+                        .substring(
+                            index + 1
+                        )
+                        .trim();
 
 
-        $('statusDetail').textContent =
-            output;
+                if (
+                    value.length >= 2 &&
+                    value.startsWith('"') &&
+                    value.endsWith('"')
+                ) {
+
+                    value =
+                        value.substring(
+                            1,
+                            value.length - 1
+                        );
+                }
 
 
-    } catch (error) {
-
-        $('status').textContent =
-            '● 状态读取失败';
-
-
-        $('status').className =
-            'badge stopped';
+                data[key] =
+                    value;
+            }
+        );
 
 
-        $('statusDetail').textContent =
-            String(
-                error?.message ||
-                error
+    return data;
+}
+
+
+function utf8Base64(
+    text
+) {
+
+    const bytes =
+        new TextEncoder()
+            .encode(text);
+
+
+    let binary = '';
+
+
+    for (
+        const byte of bytes
+    ) {
+
+        binary +=
+            String.fromCharCode(
+                byte
             );
     }
+
+
+    return btoa(binary);
 }
 
 
@@ -600,9 +544,7 @@ async function loadConfig() {
 
     const result =
         await run(
-            'cat ' +
-            shellQuote(CONFIG) +
-            ' 2>&1'
+            `${quote(MANAGER)} get-config`
         );
 
 
@@ -611,16 +553,24 @@ async function loadConfig() {
     ) {
 
         throw new Error(
-            '无法读取配置文件：\n' +
-            CONFIG +
-            '\n\n' +
+            'manager.sh get-config 执行失败\n\n' +
             result.output
         );
     }
 
 
+    if (
+        !result.stdout.trim()
+    ) {
+
+        throw new Error(
+            'manager.sh 没有返回配置数据'
+        );
+    }
+
+
     const config =
-        parseConfig(
+        parseKeyValue(
             result.stdout
         );
 
@@ -646,7 +596,8 @@ async function loadConfig() {
 
 
     $('connectionMode').value =
-        config.CONNECTION_MODE || 'auto';
+        config.CONNECTION_MODE ||
+        'auto';
 
 
     $('debug').checked =
@@ -654,31 +605,273 @@ async function loadConfig() {
 
 
     $('logMaxSize').value =
-        config.LOG_MAX_SIZE_MB || '5';
+        config.LOG_MAX_SIZE_MB ||
+        '5';
 
 
     $('logKeepCount').value =
-        config.LOG_KEEP_COUNT || '3';
+        config.LOG_KEEP_COUNT ||
+        '3';
 
 
     setMessage(
-        '配置读取成功：' +
-        CONFIG
+        `配置读取成功\n配置文件：${config.CONFIG_FILE || '未知'}`
     );
 }
 
 
-async function saveConfig(
-    restart = false
+async function refreshStatus() {
+
+    try {
+
+        const result =
+            await run(
+                `${quote(MANAGER)} status`
+            );
+
+
+        const output =
+            result.output;
+
+
+        if (
+            result.errno !== 0
+        ) {
+
+            throw new Error(
+                output ||
+                'status 执行失败'
+            );
+        }
+
+
+        const running =
+            output.includes(
+                '运行状态：运行中'
+            );
+
+
+        $('status').textContent =
+            running
+                ? '● 探针运行中'
+                : '● 探针已停止';
+
+
+        $('status').className =
+            'badge ' +
+            (
+                running
+                    ? 'running'
+                    : 'stopped'
+            );
+
+
+        $('statusDetail')
+            .textContent =
+                output;
+
+
+    } catch (error) {
+
+        $('status').textContent =
+            '● 状态读取失败';
+
+
+        $('status').className =
+            'badge stopped';
+
+
+        $('statusDetail')
+            .textContent =
+                error?.message ||
+                String(error);
+    }
+}
+
+
+async function showLogs() {
+
+    try {
+
+        const result =
+            await run(
+                `${quote(MANAGER)} logs`
+            );
+
+
+        $('logs').textContent =
+            result.output ||
+            '暂无日志。';
+
+
+    } catch (error) {
+
+        $('logs').textContent =
+            '日志读取失败：\n' +
+            (
+                error?.message ||
+                String(error)
+            );
+    }
+}
+
+
+async function executeAction(
+    action
 ) {
 
-    const payload = [
+    if (busy) {
+        return;
+    }
 
-        `SERVER_ID=${$('serverId').value.trim()}`,
 
-        `SECRET=${$('secret').value.trim()}`,
+    busy = true;
 
-        `WORKER_URL=${$('workerUrl').value.trim()}`,
+    disableButtons(true);
+
+
+    loading(
+        true,
+        `正在执行：${action}`,
+        '正在等待 manager.sh 完成，请稍候...'
+    );
+
+
+    try {
+
+        /*
+         * 这里不再自己构造后台 sh。
+         *
+         * 直接等待 manager.sh 完成。
+         *
+         * 这样可以确保：
+         *
+         * restart 完成
+         * stop 完成
+         * toggle-debug 完成
+         *
+         * 后面再读取 status。
+         */
+
+        const result =
+            await run(
+                `${quote(MANAGER)} ${quote(action)}`
+            );
+
+
+        const output =
+            result.output ||
+            '(无输出)';
+
+
+        if (
+            result.errno !== 0
+        ) {
+
+            throw new Error(
+                output
+            );
+        }
+
+
+        setMessage(
+            output
+        );
+
+
+        await refreshStatus();
+
+        await showLogs();
+
+
+    } catch (error) {
+
+        setMessage(
+            '[操作失败]\n\n' +
+            (
+                error?.message ||
+                String(error)
+            )
+        );
+
+
+        await refreshStatus();
+
+    } finally {
+
+        loading(false);
+
+        disableButtons(false);
+
+        busy = false;
+    }
+}
+
+
+async function saveConfig(
+    restart
+) {
+
+    if (busy) {
+        return;
+    }
+
+
+    const serverId =
+        $('serverId')
+            .value
+            .trim();
+
+
+    const secret =
+        $('secret')
+            .value
+            .trim();
+
+
+    const workerUrl =
+        $('workerUrl')
+            .value
+            .trim();
+
+
+    if (!serverId) {
+
+        setMessage(
+            '[错误] Agent ID 不能为空'
+        );
+
+        return;
+    }
+
+
+    if (!secret) {
+
+        setMessage(
+            '[错误] Secret 不能为空'
+        );
+
+        return;
+    }
+
+
+    if (!workerUrl) {
+
+        setMessage(
+            '[错误] 服务端地址不能为空'
+        );
+
+        return;
+    }
+
+
+    const config = [
+
+        `SERVER_ID=${serverId}`,
+
+        `SECRET=${secret}`,
+
+        `WORKER_URL=${workerUrl}`,
 
         `COLLECT_INTERVAL=${$('collectInterval').value}`,
 
@@ -696,15 +889,20 @@ async function saveConfig(
 
 
     const encoded =
-        b64Utf8(payload);
+        utf8Base64(
+            config
+        );
 
 
-    setButtonsDisabled(true);
+    busy = true;
+
+    disableButtons(true);
 
 
-    showLoading(
-        '正在保存配置...',
-        '正在写入运行时配置'
+    loading(
+        true,
+        '正在保存配置',
+        '正在写入 /data/adb/cf-server-monitor/config.conf'
     );
 
 
@@ -712,14 +910,12 @@ async function saveConfig(
 
         const result =
             await run(
-                `printf %s ${shellQuote(encoded)} | ` +
-                `${shellQuote(SAVER)}`
+                `${quote(MANAGER)} save-config ${quote(encoded)}`
             );
 
 
         if (
-            result.errno !== 0 ||
-            !result.output.includes('OK')
+            result.errno !== 0
         ) {
 
             throw new Error(
@@ -729,13 +925,45 @@ async function saveConfig(
         }
 
 
+        /*
+         * 保存后马上重新读取。
+         *
+         * 如果这里读取不到，
+         * 就直接报错，而不是静默。
+         */
+
         await loadConfig();
 
 
         if (restart) {
 
-            await backgroundAction(
-                'restart'
+            loading(
+                true,
+                '配置已保存',
+                '正在重启 cf-probe 并验证新进程...'
+            );
+
+
+            const restartResult =
+                await run(
+                    `${quote(MANAGER)} restart`
+                );
+
+
+            if (
+                restartResult.errno !== 0
+            ) {
+
+                throw new Error(
+                    restartResult.output ||
+                    '重启失败'
+                );
+            }
+
+
+            setMessage(
+                restartResult.output ||
+                '配置已保存并重启成功。'
             );
 
         } else {
@@ -746,134 +974,7 @@ async function saveConfig(
         }
 
 
-    } catch (error) {
-
-        setMessage(
-            '[错误]\n' +
-            (
-                error?.message ||
-                String(error)
-            )
-        );
-
-
-    } finally {
-
-        hideLoading();
-
-        setButtonsDisabled(false);
-    }
-}
-
-
-async function backgroundAction(
-    name
-) {
-
-    setButtonsDisabled(true);
-
-
-    showLoading(
-        '正在执行：' + name,
-        '请稍候...'
-    );
-
-
-    try {
-
-        const command =
-            `${shellQuote(MANAGER)} ${shellQuote(name)} ` +
-            `> ${shellQuote(ACTION_LOG)} 2>&1`;
-
-
-        const background =
-            '/system/bin/sh -c ' +
-            shellQuote(
-                command +
-                ' & echo $!'
-            );
-
-
-        const start =
-            await run(background);
-
-
-        const pid =
-            String(
-                start.stdout || ''
-            )
-            .trim()
-            .split(/\s+/)
-            .pop();
-
-
-        if (
-            !/^\d+$/.test(
-                pid || ''
-            )
-        ) {
-
-            throw new Error(
-                start.output ||
-                '无法启动后台任务'
-            );
-        }
-
-
-        const startTime =
-            Date.now();
-
-
-        while (
-            Date.now() -
-            startTime <
-            30000
-        ) {
-
-            const alive =
-                await run(
-                    `kill -0 ${pid} 2>/dev/null`
-                );
-
-
-            const logResult =
-                await run(
-                    'cat ' +
-                    shellQuote(ACTION_LOG) +
-                    ' 2>/dev/null'
-                );
-
-
-            if (
-                logResult.stdout
-            ) {
-
-                setMessage(
-                    logResult.stdout
-                );
-            }
-
-
-            if (
-                alive.errno !== 0
-            ) {
-
-                break;
-            }
-
-
-            await new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        500
-                    )
-            );
-        }
-
-
         await refreshStatus();
-
 
         await showLogs();
 
@@ -881,7 +982,153 @@ async function backgroundAction(
     } catch (error) {
 
         setMessage(
-            '[操作失败]\n' +
+            '[保存失败]\n\n' +
+            (
+                error?.message ||
+                String(error)
+            )
+        );
+
+    } finally {
+
+        loading(false);
+
+        disableButtons(false);
+
+        busy = false;
+    }
+}
+
+
+async function clearLogs() {
+
+    if (
+        !confirm(
+            '确定要清空全部日志吗？'
+        )
+    ) {
+
+        return;
+    }
+
+
+    await executeAction(
+        'clear-logs'
+    );
+}
+
+
+async function toggleDebug() {
+
+    await executeAction(
+        'toggle-debug'
+    );
+
+
+    /*
+     * toggle-debug 已经完成：
+     *
+     * 修改配置
+     * ↓
+     * restart
+     * ↓
+     * 验证实际 PID
+     *
+     * 所以这里再重新读取一次配置。
+     */
+
+    try {
+
+        await loadConfig();
+
+    } catch (error) {
+
+        setMessage(
+            '[警告] Debug 已执行，但重新读取配置失败：\n' +
+            (
+                error?.message ||
+                String(error)
+            )
+        );
+    }
+}
+
+
+async function init() {
+
+    if (initialized) {
+        return;
+    }
+
+
+    initialized = true;
+
+
+    setMessage(
+        '正在初始化 WebUI...'
+    );
+
+
+    try {
+
+        /*
+         * 三个初始化操作依次执行。
+         *
+         * 不使用 Promise.all，
+         * 避免多个 ksu.exec 同时初始化时
+         * 在部分 KernelSU WebView 环境下发生竞态。
+         */
+
+        await loadConfig();
+
+        await refreshStatus();
+
+        await showLogs();
+
+
+        setMessage(
+            '初始化完成。'
+        );
+
+
+        if (statusTimer) {
+            clearInterval(statusTimer);
+        }
+
+
+        /*
+         * 每 3 秒主动执行一次 manager status。
+         *
+         * 注意：
+         *
+         * 这里刷新的是 cf-probe 的真实 PID，
+         * 不是读取旧 PID 文件直接显示。
+         */
+
+        statusTimer =
+            setInterval(
+                async () => {
+
+                    if (
+                        !busy
+                    ) {
+
+                        await refreshStatus();
+                    }
+
+                },
+                3000
+            );
+
+
+    } catch (error) {
+
+        /*
+         * 任何初始化错误都必须显示。
+         */
+
+        setMessage(
+            '[WebUI 初始化失败]\n\n' +
             (
                 error?.message ||
                 String(error)
@@ -889,23 +1136,26 @@ async function backgroundAction(
         );
 
 
-    } finally {
+        $('status').textContent =
+            '● 初始化失败';
 
-        hideLoading();
 
-        setButtonsDisabled(false);
+        $('status').className =
+            'badge stopped';
+
+
+        $('statusDetail')
+            .textContent =
+                (
+                    error?.message ||
+                    String(error)
+                );
     }
 }
 
 
 window.action =
-    async function (name) {
-
-        await backgroundAction(
-            name
-        );
-
-    };
+    executeAction;
 
 
 window.saveConfig =
@@ -917,93 +1167,41 @@ window.refreshStatus =
 
 
 window.showLogs =
-    async function () {
-
-        try {
-
-            const result =
-                await run(
-                    `${shellQuote(MANAGER)} logs`
-                );
-
-
-            $('logs').textContent =
-                result.output ||
-                '暂无日志。';
-
-
-        } catch (error) {
-
-            $('logs').textContent =
-                '读取日志失败：\n' +
-                String(error);
-        }
-    };
+    showLogs;
 
 
 window.clearLogs =
-    async function () {
-
-        if (
-            !confirm(
-                '确定要清空全部日志吗？'
-            )
-        ) {
-
-            return;
-        }
-
-
-        await backgroundAction(
-            'clear-logs'
-        );
-    };
+    clearLogs;
 
 
 window.toggleDebug =
-    async function () {
-
-        await backgroundAction(
-            'toggle-debug'
-        );
+    toggleDebug;
 
 
-        await loadConfig();
-    };
+/*
+ * 不再使用 DOMContentLoaded。
+ *
+ * 因为这是 module script，
+ * 页面加载完成后直接初始化。
+ */
 
+if (
+    document.readyState ===
+    'loading'
+) {
 
-document.addEventListener(
-    'DOMContentLoaded',
-    async function () {
-
-        try {
-
-            await loadConfig();
-
-            await refreshStatus();
-
-            await showLogs();
-
-
-            setInterval(
-                refreshStatus,
-                5000
-            );
-
-
-        } catch (error) {
-
-            setMessage(
-                '初始化失败：\n' +
-                (
-                    error?.message ||
-                    String(error)
-                )
-            );
+    window.addEventListener(
+        'load',
+        init,
+        {
+            once: true
         }
+    );
 
-    }
-);
+} else {
+
+    init();
+}
 
 </script>
 
@@ -1041,9 +1239,9 @@ document.addEventListener(
 
     <div
         id="status"
-        class="badge">
+        class="badge stopped">
 
-        加载中...
+        正在读取状态...
 
     </div>
 
@@ -1127,7 +1325,7 @@ document.addEventListener(
 
     <div class="small">
 
-        开启后会记录更多网络、上报和探测信息。
+        切换后会自动重启 cf-probe，并验证实际进程是否使用对应的 -debug 参数。
 
     </div>
 
@@ -1139,7 +1337,7 @@ document.addEventListener(
         <button
             onclick="toggleDebug()">
 
-            立即切换调试状态
+            切换 Debug 并立即生效
 
         </button>
 
