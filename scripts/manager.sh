@@ -158,16 +158,9 @@ get_ssl_cert_dir() {
 
 pid_alive() {
 
-    [ -n "${1:-}" ] &&
-        kill -0 "$1" 2>/dev/null
-}
+    pid="$1"
 
-get_pid() {
-
-    [ -f "$PIDFILE" ] ||
-        return 1
-
-    pid=$(cat "$PIDFILE" 2>/dev/null)
+    [ -n "$pid" ] || return 1
 
     case "$pid" in
         ''|*[!0-9]*)
@@ -175,10 +168,76 @@ get_pid() {
             ;;
     esac
 
-    pid_alive "$pid" ||
-        return 1
 
-    printf '%s\n' "$pid"
+    [ "$pid" -gt 0 ] || return 1
+
+
+    [ -r "/proc/$pid/cmdline" ] || return 1
+
+
+    cmdline=$(
+        tr '\000' ' ' \
+            < "/proc/$pid/cmdline" \
+            2>/dev/null
+    )
+
+
+    case "$cmdline" in
+
+        *"$BIN"*)
+            return 0
+            ;;
+
+        *)
+            return 1
+            ;;
+
+    esac
+}
+
+get_pid() {
+
+    if [ -f "$PIDFILE" ]; then
+
+        pid=$(cat "$PIDFILE" 2>/dev/null)
+
+        case "$pid" in
+
+            ''|*[!0-9]*)
+                pid=""
+                ;;
+
+        esac
+
+
+        if [ -n "$pid" ] &&
+            pid_alive "$pid"; then
+
+            printf '%s\n' "$pid"
+
+            return 0
+        fi
+
+    fi
+
+
+    # PID 文件失效时主动寻找真正的 cf-probe
+    pid=$(find_probe_pid)
+
+
+    if [ -n "$pid" ] &&
+        pid_alive "$pid"; then
+
+        printf '%s\n' "$pid"
+
+        return 0
+    fi
+
+
+    # 清理失效 PID 文件
+    rm -f "$PIDFILE"
+
+    return 1
 }
 
 find_probe_pid() {
@@ -493,7 +552,21 @@ stop() {
 
             rm -f "$PIDFILE"
 
-            log "探针当前已经停止。"
+
+            fallback_pid=$(find_probe_pid)
+
+            if [ -n "$fallback_pid" ] &&
+                pid_alive "$fallback_pid"; then
+
+                log "[错误] 探针仍然在运行。"
+
+                update_module_description
+
+                return 1
+            fi
+
+
+            log "探针已停止。"
 
             update_module_description
 
