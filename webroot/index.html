@@ -534,7 +534,7 @@ pre {
     try {
 
         const kernelsu =
-            await import('kernelsu');
+            await import('./kernelsu.js');
 
         exec =
             kernelsu.exec;
@@ -545,6 +545,28 @@ pre {
 
             throw new Error(
                 'kernelsu.exec is not available'
+            );
+
+        }
+
+        if (
+            typeof window.ksu === 'undefined'
+        ) {
+
+            throw new Error(
+                '当前 KernelSU Manager 没有注入 ksu WebUI API。\n' +
+                '请确认当前打开的是 KernelSU/SukiSU/ReSukiSU 的模块 WebUI，' +
+                '而不是普通浏览器。'
+            );
+
+        }
+
+        if (
+            typeof window.ksu.exec !== 'function'
+        ) {
+
+            throw new Error(
+                '当前 KernelSU WebUI 不支持 ksu.exec()'
             );
 
         }
