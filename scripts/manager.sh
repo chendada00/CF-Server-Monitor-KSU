@@ -13,14 +13,9 @@ PIDFILE="$DATADIR/cf-probe.pid"
 LOGDIR="$DATADIR/logs"
 LOGFILE="$LOGDIR/cf-probe.log"
 
-ACTION_LOG="$DATADIR/webui-action.log"
-
 KSU_BUSYBOX="/data/adb/ksu/bin/busybox"
 
 CF_PROBE_UPDATE_DNS_SERVER="223.5.5.5"
-
-DEFAULT_LOG_MAX_SIZE_MB=5
-DEFAULT_LOG_KEEP_COUNT=3
 
 
 mkdir -p "$DATADIR" "$LOGDIR"
@@ -46,6 +41,7 @@ init_config() {
     mkdir -p "$DATADIR" "$LOGDIR"
 
     if [ -f "$CONFIG" ]; then
+        chmod 600 "$CONFIG" 2>/dev/null || true
         return 0
     fi
 
@@ -99,6 +95,8 @@ load_config() {
 
     AUTO_UPDATE="${AUTO_UPDATE:-0}"
     UPDATE_PROXY="${UPDATE_PROXY:-}"
+
+    CONFIG_MD5="${CONFIG_MD5:-none}"
 
     DEBUG="${DEBUG:-0}"
 
@@ -160,6 +158,20 @@ validate_config() {
             ;;
     esac
 
+    case "$LOG_MAX_SIZE_MB" in
+        ''|*[!0-9]*)
+            log "[错误] LOG_MAX_SIZE_MB 必须是数字"
+            return 1
+            ;;
+    esac
+
+    case "$LOG_KEEP_COUNT" in
+        ''|*[!0-9]*)
+            log "[错误] LOG_KEEP_COUNT 必须是数字"
+            return 1
+            ;;
+    esac
+
     return 0
 }
 
@@ -196,9 +208,7 @@ pid_alive() {
 
     [ -r "/proc/$pid/cmdline" ] || return 1
 
-    cmdline=$(
-        tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null
-    )
+    cmdline=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
 
     case "$cmdline" in
         *"$BIN"*)
@@ -240,6 +250,7 @@ find_probe_pid() {
 
 get_pid() {
 
+    # 第一优先级：PID 文件
     if [ -f "$PIDFILE" ]; then
 
         pid=$(cat "$PIDFILE" 2>/dev/null)
@@ -256,10 +267,15 @@ get_pid() {
         fi
     fi
 
+    # PID 文件失效时重新扫描真实进程
     pid=$(find_probe_pid 2>/dev/null || true)
 
     if [ -n "$pid" ] && pid_alive "$pid"; then
+
+        printf '%s\n' "$pid" > "$PIDFILE"
+
         printf '%s\n' "$pid"
+
         return 0
     fi
 
@@ -271,6 +287,40 @@ get_pid() {
 
 is_running() {
     get_pid >/dev/null 2>&1
+}
+
+
+get_probe_cmdline() {
+
+    pid=$(get_pid 2>/dev/null || true)
+
+    if [ -z "$pid" ]; then
+        return 1
+    fi
+
+    tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null
+}
+
+
+get_runtime_debug() {
+
+    cmdline=$(get_probe_cmdline 2>/dev/null || true)
+
+    case "$cmdline" in
+
+        *"-debug=1"*)
+            printf '1'
+            ;;
+
+        *"-debug=0"*)
+            printf '0'
+            ;;
+
+        *)
+            printf 'unknown'
+            ;;
+
+    esac
 }
 
 
@@ -348,44 +398,60 @@ rotate_logs() {
 }
 
 
+#
+# 更新 KernelSU 模块 description。
+#
+# 注意：
+# status() 绝对不会调用这个函数。
+#
+# 只在 start / stop / restart / toggle-debug
+# 等真正发生状态变化的操作之后调用。
+#
+# 并且放到后台执行，避免 KernelSU CLI 卡住 WebUI。
+#
 update_module_description() {
 
-    pid=$(get_pid 2>/dev/null || true)
+    (
+        sleep 0.1
 
-    if [ -n "$pid" ]; then
-        desc="● 探针运行中 | PID=$pid"
-    else
-        desc="● 探针已停止"
-    fi
+        pid=$(get_pid 2>/dev/null || true)
 
-    if [ -f "$CONFIG" ]; then
-
-        # shellcheck disable=SC1090
-        . "$CONFIG" 2>/dev/null || true
-
-        desc="$desc | 上报=${REPORT_INTERVAL:-60}秒"
-
-        if [ "${DEBUG:-0}" = "1" ]; then
-            desc="$desc | 调试已开启"
+        if [ -n "$pid" ]; then
+            desc="● 探针运行中 | PID=$pid"
         else
-            desc="$desc | 调试已关闭"
+            desc="● 探针已停止"
         fi
-    fi
 
-    if command -v ksud >/dev/null 2>&1; then
+        if [ -f "$CONFIG" ]; then
 
-        ksud module config set \
-            override.description \
-            "$desc" \
-            >/dev/null 2>&1 || true
+            # shellcheck disable=SC1090
+            . "$CONFIG" 2>/dev/null || true
 
-    elif [ -x "/data/adb/ksud" ]; then
+            desc="$desc | 上报=${REPORT_INTERVAL:-60}秒"
 
-        /data/adb/ksud module config set \
-            override.description \
-            "$desc" \
-            >/dev/null 2>&1 || true
-    fi
+            if [ "${DEBUG:-0}" = "1" ]; then
+                desc="$desc | 调试已开启"
+            else
+                desc="$desc | 调试已关闭"
+            fi
+        fi
+
+        if command -v ksud >/dev/null 2>&1; then
+
+            ksud module config set \
+                override.description \
+                "$desc" \
+                >/dev/null 2>&1 || true
+
+        elif [ -x "/data/adb/ksud" ]; then
+
+            /data/adb/ksud module config set \
+                override.description \
+                "$desc" \
+                >/dev/null 2>&1 || true
+        fi
+
+    ) >/dev/null 2>&1 &
 }
 
 
@@ -415,10 +481,99 @@ show_config() {
     echo "AUTO_UPDATE=$AUTO_UPDATE"
     echo "UPDATE_PROXY=$UPDATE_PROXY"
 
+    echo "CONFIG_MD5=$CONFIG_MD5"
+
     echo "DEBUG=$DEBUG"
 
     echo "LOG_MAX_SIZE_MB=$LOG_MAX_SIZE_MB"
     echo "LOG_KEEP_COUNT=$LOG_KEEP_COUNT"
+}
+
+
+#
+# 给配置值做 shell 安全转义。
+#
+escape_config_value() {
+
+    printf '%s' "$1" |
+        sed \
+            's/\\/\\\\/g; s/"/\\"/g'
+}
+
+
+#
+# 只修改一个 key。
+#
+# 不重新构建整个 config.conf。
+#
+# 因此：
+#
+# CT_NODE
+# CU_NODE
+# CM_NODE
+# BD_NODE
+# INTERFACE
+# RESET_DAY
+# AUTO_UPDATE
+# UPDATE_PROXY
+# CONFIG_MD5
+#
+# 等其他字段都不会因为 WebUI 保存而丢失。
+#
+set_config_value() {
+
+    key="$1"
+    value="$2"
+
+    tmp="$CONFIG.tmp.$$"
+
+    escaped=$(escape_config_value "$value")
+
+    awk \
+        -v key="$key" \
+        -v value="$escaped" '
+
+        BEGIN {
+            found = 0
+        }
+
+        $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
+
+            print key "=\"" value "\""
+
+            found = 1
+
+            next
+        }
+
+        {
+            print
+        }
+
+        END {
+
+            if (!found) {
+                print key "=\"" value "\""
+            }
+        }
+
+    ' "$CONFIG" > "$tmp" || {
+
+        rm -f "$tmp"
+
+        return 1
+    }
+
+    chmod 600 "$tmp" 2>/dev/null || true
+
+    mv "$tmp" "$CONFIG" || {
+
+        rm -f "$tmp"
+
+        return 1
+    }
+
+    return 0
 }
 
 
@@ -431,115 +586,49 @@ save_config() {
         return 1
     fi
 
-    mkdir -p "$DATADIR"
+    init_config || return 1
 
-    tmp="$CONFIG.tmp.$$"
 
     decoded=$(
         printf '%s' "$encoded" |
         base64 -d 2>/dev/null
     )
 
+
     if [ -z "$decoded" ]; then
-        log "[错误] 配置数据解析失败"
+        log "[错误] 配置数据 Base64 解码失败"
         return 1
     fi
 
-    SERVER_ID=""
-    SECRET=""
-    WORKER_URL=""
 
-    COLLECT_INTERVAL="0"
-    REPORT_INTERVAL="60"
+    #
+    # 保存之前先备份。
+    #
+    backup="$CONFIG.bak"
 
-    CONNECTION_MODE="auto"
-    DEBUG="0"
-
-    LOG_MAX_SIZE_MB="5"
-    LOG_KEEP_COUNT="3"
-
-    CT_NODE=""
-    CU_NODE=""
-    CM_NODE=""
-    BD_NODE=""
-
-    INTERFACE=""
-    RESET_DAY="1"
-
-    AUTO_UPDATE="0"
-    UPDATE_PROXY=""
+    cp "$CONFIG" "$backup" 2>/dev/null || true
 
 
     while IFS='=' read -r key value; do
 
         case "$key" in
 
-            SERVER_ID)
-                SERVER_ID="$value"
-                ;;
+            SERVER_ID|SECRET|WORKER_URL|\
+            COLLECT_INTERVAL|REPORT_INTERVAL|\
+            CT_NODE|CU_NODE|CM_NODE|BD_NODE|\
+            INTERFACE|RESET_DAY|\
+            CONNECTION_MODE|AUTO_UPDATE|UPDATE_PROXY|\
+            DEBUG|LOG_MAX_SIZE_MB|LOG_KEEP_COUNT)
 
-            SECRET)
-                SECRET="$value"
-                ;;
+                set_config_value "$key" "$value" || {
 
-            WORKER_URL)
-                WORKER_URL="$value"
-                ;;
+                    log "[错误] 写入配置失败：$key"
 
-            COLLECT_INTERVAL)
-                COLLECT_INTERVAL="$value"
-                ;;
+                    cp "$backup" "$CONFIG" 2>/dev/null || true
 
-            REPORT_INTERVAL)
-                REPORT_INTERVAL="$value"
-                ;;
+                    return 1
+                }
 
-            CT_NODE)
-                CT_NODE="$value"
-                ;;
-
-            CU_NODE)
-                CU_NODE="$value"
-                ;;
-
-            CM_NODE)
-                CM_NODE="$value"
-                ;;
-
-            BD_NODE)
-                BD_NODE="$value"
-                ;;
-
-            INTERFACE)
-                INTERFACE="$value"
-                ;;
-
-            RESET_DAY)
-                RESET_DAY="$value"
-                ;;
-
-            CONNECTION_MODE)
-                CONNECTION_MODE="$value"
-                ;;
-
-            AUTO_UPDATE)
-                AUTO_UPDATE="$value"
-                ;;
-
-            UPDATE_PROXY)
-                UPDATE_PROXY="$value"
-                ;;
-
-            DEBUG)
-                DEBUG="$value"
-                ;;
-
-            LOG_MAX_SIZE_MB)
-                LOG_MAX_SIZE_MB="$value"
-                ;;
-
-            LOG_KEEP_COUNT)
-                LOG_KEEP_COUNT="$value"
                 ;;
 
         esac
@@ -549,167 +638,52 @@ $decoded
 EOF
 
 
-    case "$COLLECT_INTERVAL" in
-        ''|*[!0-9]*)
-            log "[错误] COLLECT_INTERVAL 必须是数字"
-            return 1
-            ;;
-    esac
-
-    case "$REPORT_INTERVAL" in
-        ''|*[!0-9]*)
-            log "[错误] REPORT_INTERVAL 必须是数字"
-            return 1
-            ;;
-    esac
-
-    case "$CONNECTION_MODE" in
-        auto|http)
-            ;;
-        *)
-            log "[错误] CONNECTION_MODE 无效"
-            return 1
-            ;;
-    esac
-
-    case "$DEBUG" in
-        0|1)
-            ;;
-        *)
-            log "[错误] DEBUG 无效"
-            return 1
-            ;;
-    esac
-
-    case "$LOG_MAX_SIZE_MB" in
-        ''|*[!0-9]*)
-            LOG_MAX_SIZE_MB="5"
-            ;;
-    esac
-
-    case "$LOG_KEEP_COUNT" in
-        ''|*[!0-9]*)
-            LOG_KEEP_COUNT="3"
-            ;;
-    esac
+    chmod 600 "$CONFIG" 2>/dev/null || true
 
 
-    if [ -z "$SERVER_ID" ]; then
-        log "[错误] SERVER_ID 不能为空"
-        return 1
-    fi
+    #
+    # 保存完成后重新读取，确认 REPORT_INTERVAL 等字段
+    # 真正进入了配置文件。
+    #
+    load_config || {
 
-    if [ -z "$SECRET" ]; then
-        log "[错误] SECRET 不能为空"
-        return 1
-    fi
+        log "[错误] 保存后重新读取配置失败"
 
-    if [ -z "$WORKER_URL" ]; then
-        log "[错误] WORKER_URL 不能为空"
-        return 1
-    fi
-
-
-    {
-        printf '%s\n' '# CF Server Monitor Android / KernelSU 配置'
-
-        printf 'SERVER_ID=%s\n' "$(printf '%s' "$SERVER_ID" | sed 's/"/\\"/g' | sed 's/^/"/;s/$/"/')"
-
-        printf 'SECRET=%s\n' "$(printf '%s' "$SECRET" | sed 's/"/\\"/g' | sed 's/^/"/;s/$/"/')"
-
-        printf 'WORKER_URL=%s\n' "$(printf '%s' "$WORKER_URL" | sed 's/"/\\"/g' | sed 's/^/"/;s/$/"/')"
-
-        printf 'COLLECT_INTERVAL="%s"\n' "$COLLECT_INTERVAL"
-        printf 'REPORT_INTERVAL="%s"\n' "$REPORT_INTERVAL"
-
-        printf 'CT_NODE="%s"\n' "$CT_NODE"
-        printf 'CU_NODE="%s"\n' "$CU_NODE"
-        printf 'CM_NODE="%s"\n' "$CM_NODE"
-        printf 'BD_NODE="%s"\n' "$BD_NODE"
-
-        printf 'INTERFACE="%s"\n' "$INTERFACE"
-        printf 'RESET_DAY="%s"\n' "$RESET_DAY"
-
-        printf 'CONNECTION_MODE="%s"\n' "$CONNECTION_MODE"
-
-        printf 'AUTO_UPDATE="%s"\n' "$AUTO_UPDATE"
-        printf 'UPDATE_PROXY="%s"\n' "$UPDATE_PROXY"
-
-        printf 'CONFIG_MD5="%s"\n' "none"
-
-        printf 'DEBUG="%s"\n' "$DEBUG"
-
-        printf 'LOG_MAX_SIZE_MB="%s"\n' "$LOG_MAX_SIZE_MB"
-        printf 'LOG_KEEP_COUNT="%s"\n' "$LOG_KEEP_COUNT"
-
-    } > "$tmp" || {
-
-        rm -f "$tmp"
-
-        log "[错误] 无法写入配置"
+        cp "$backup" "$CONFIG" 2>/dev/null || true
 
         return 1
     }
 
 
-    chmod 600 "$tmp" 2>/dev/null || true
+    #
+    # 二次确认。
+    #
+    if [ -z "$REPORT_INTERVAL" ]; then
+        log "[错误] REPORT_INTERVAL 保存后为空"
 
-    mv "$tmp" "$CONFIG" || {
-
-        rm -f "$tmp"
-
-        log "[错误] 无法替换配置文件"
+        cp "$backup" "$CONFIG" 2>/dev/null || true
 
         return 1
-    }
+    fi
 
 
-    log "OK"
-    log "配置保存成功。"
+    rm -f "$backup"
+
+
+    echo "配置保存成功。"
+    echo "配置文件：$CONFIG"
+    echo "REPORT_INTERVAL=$REPORT_INTERVAL"
+    echo "COLLECT_INTERVAL=$COLLECT_INTERVAL"
+    echo "DEBUG=$DEBUG"
 
     return 0
-}
-
-
-get_probe_cmdline() {
-
-    pid=$(get_pid 2>/dev/null || true)
-
-    if [ -z "$pid" ]; then
-        return 1
-    fi
-
-    tr '\000' ' ' \
-        < "/proc/$pid/cmdline" \
-        2>/dev/null
-}
-
-
-get_debug_runtime() {
-
-    cmdline=$(get_probe_cmdline 2>/dev/null || true)
-
-    case "$cmdline" in
-
-        *"-debug=1"*)
-            printf '%s' "1"
-            ;;
-
-        *"-debug=0"*)
-            printf '%s' "0"
-            ;;
-
-        *)
-            printf '%s' "unknown"
-            ;;
-
-    esac
 }
 
 
 start() {
 
     rotate_logs
+
 
     if pid=$(get_pid 2>/dev/null); then
 
@@ -756,10 +730,9 @@ start() {
     manager_log "========================================"
     manager_log "启动 cf-probe"
     manager_log "CONFIG=$CONFIG"
-    manager_log "SERVER_ID=$SERVER_ID"
-    manager_log "WORKER_URL=$WORKER_URL"
-    manager_log "COLLECT_INTERVAL=$COLLECT_INTERVAL"
+    manager_log "PIDFILE=$PIDFILE"
     manager_log "REPORT_INTERVAL=$REPORT_INTERVAL"
+    manager_log "COLLECT_INTERVAL=$COLLECT_INTERVAL"
     manager_log "CONNECTION_MODE=$CONNECTION_MODE"
     manager_log "DEBUG=$DEBUG"
     manager_log "DEBUG_ARG=$DEBUG_ARG"
@@ -771,6 +744,11 @@ start() {
     log "启动参数=$DEBUG_ARG"
 
 
+    #
+    # 使用独立 session。
+    #
+    # 不把 cf-probe 绑定在 WebUI 进程上。
+    #
     if [ -x "$KSU_BUSYBOX" ]; then
 
         CF_PROBE_UPDATE_DNS="$CF_PROBE_UPDATE_DNS_SERVER" \
@@ -785,7 +763,7 @@ start() {
 
         CF_PROBE_UPDATE_DNS="$CF_PROBE_UPDATE_DNS_SERVER" \
         SSL_CERT_DIR="$SSL_CERT_DIR" \
-        nohup \
+        setsid \
             "$BIN" run \
             -config="$CONFIG" \
             "$DEBUG_ARG" \
@@ -794,50 +772,43 @@ start() {
     fi
 
 
-    launch_pid=$!
+    #
+    # 不相信 $! 就是 cf-probe PID。
+    #
+    # Android / BusyBox 的 setsid 实现可能返回 wrapper PID。
+    #
+    # 所以启动后扫描真实 cf-probe。
+    #
+    count=0
 
+    while [ "$count" -lt 10 ]; do
 
-    sleep 2
+        sleep 1
 
+        pid=$(find_probe_pid 2>/dev/null || true)
 
-    if pid_alive "$launch_pid"; then
+        if [ -n "$pid" ] &&
+            pid_alive "$pid"; then
 
-        printf '%s\n' "$launch_pid" > "$PIDFILE"
+            printf '%s\n' "$pid" > "$PIDFILE"
 
-        runtime_debug=$(get_debug_runtime 2>/dev/null || true)
+            runtime_debug=$(get_runtime_debug)
 
-        log "启动成功。"
-        log "PID=$launch_pid"
-        log "实际 Debug=$runtime_debug"
+            log "启动成功。"
+            log "PID=$pid"
+            log "实际 Debug=$runtime_debug"
 
-        update_module_description
+            update_module_description
 
-        return 0
-    fi
+            return 0
+        fi
 
-
-    fallback_pid=$(find_probe_pid 2>/dev/null || true)
-
-
-    if [ -n "$fallback_pid" ] &&
-        pid_alive "$fallback_pid"; then
-
-        printf '%s\n' "$fallback_pid" > "$PIDFILE"
-
-        runtime_debug=$(get_debug_runtime 2>/dev/null || true)
-
-        log "启动成功。"
-        log "PID=$fallback_pid"
-        log "实际 Debug=$runtime_debug"
-
-        update_module_description
-
-        return 0
-    fi
+        count=$((count + 1))
+    done
 
 
     log "[错误] cf-probe 启动失败。"
-    log "请查看：$LOGFILE"
+    log "请查看日志：$LOGFILE"
 
     update_module_description
 
@@ -871,15 +842,15 @@ stop() {
 
     count=0
 
-    while pid_alive "$pid"; do
+    while [ "$count" -lt 10 ]; do
 
-        count=$((count + 1))
-
-        if [ "$count" -ge 10 ]; then
+        if ! pid_alive "$pid"; then
             break
         fi
 
         sleep 1
+
+        count=$((count + 1))
     done
 
 
@@ -924,14 +895,48 @@ restart() {
 
     log "正在重启探针..."
 
+
     if ! stop; then
+
         log "[错误] 停止旧进程失败。"
+
         return 1
     fi
 
+
     sleep 1
 
-    start
+
+    if ! start; then
+
+        log "[错误] 新进程启动失败。"
+
+        return 1
+    fi
+
+
+    pid=$(get_pid 2>/dev/null || true)
+
+
+    if [ -z "$pid" ]; then
+
+        log "[错误] 重启后无法找到 cf-probe PID。"
+
+        return 1
+    fi
+
+
+    runtime_debug=$(get_runtime_debug)
+
+
+    log "重启成功。"
+    log "新 PID=$pid"
+    log "实际 Debug=$runtime_debug"
+
+
+    update_module_description
+
+    return 0
 }
 
 
@@ -947,27 +952,12 @@ toggle_debug() {
     fi
 
 
-    tmp="$CONFIG.tmp.$$"
-
-
-    sed \
-        "s/^DEBUG=.*/DEBUG=\"$NEW_DEBUG\"/" \
-        "$CONFIG" > "$tmp"
-
-
-    if ! grep -q '^DEBUG=' "$tmp"; then
-        printf '\nDEBUG="%s"\n' "$NEW_DEBUG" >> "$tmp"
-    fi
-
-
-    mv "$tmp" "$CONFIG" || {
-
-        rm -f "$tmp"
+    if ! set_config_value "DEBUG" "$NEW_DEBUG"; then
 
         log "[错误] 无法修改 DEBUG"
 
         return 1
-    }
+    fi
 
 
     chmod 600 "$CONFIG" 2>/dev/null || true
@@ -978,24 +968,16 @@ toggle_debug() {
 
     if is_running; then
 
-        log "正在重启 cf-probe 使 Debug 配置立即生效..."
+        log "正在重启 cf-probe 使 Debug 立即生效..."
+
 
         if ! restart; then
             return 1
         fi
 
-    else
 
-        log "当前探针未运行，仅修改配置。"
+        runtime_debug=$(get_runtime_debug)
 
-        update_module_description
-    fi
-
-
-    runtime_debug=$(get_debug_runtime 2>/dev/null || true)
-
-
-    if is_running; then
 
         if [ "$runtime_debug" = "$NEW_DEBUG" ]; then
 
@@ -1004,27 +986,21 @@ toggle_debug() {
 
         else
 
-            log "[警告] 配置 DEBUG=$NEW_DEBUG，但实际进程 Debug=$runtime_debug"
-
+            log "[警告] 配置 DEBUG=$NEW_DEBUG"
+            log "[警告] 但实际进程 Debug=$runtime_debug"
             log "实际进程参数：$(get_probe_cmdline)"
         fi
 
+    else
+
+        log "当前探针未运行。"
+        log "Debug 配置已保存，下次启动时生效。"
+
+        update_module_description
     fi
 
 
     return 0
-}
-
-
-clear_logs() {
-
-    : > "$LOGFILE"
-
-    rm -f "$LOGFILE".[0-9]*
-
-    log "日志已清空。"
-
-    update_module_description
 }
 
 
@@ -1033,14 +1009,43 @@ show_logs() {
     rotate_logs
 
     if [ -f "$LOGFILE" ]; then
+
         tail -n 200 "$LOGFILE"
+
     else
+
         log "暂无日志。"
     fi
 }
 
 
+clear_logs() {
+
+    : > "$LOGFILE"
+
+    i=1
+
+    while [ "$i" -le 20 ]; do
+        rm -f "$LOGFILE.$i"
+        i=$((i + 1))
+    done
+
+    log "日志已清空。"
+}
+
+
 status() {
+
+    #
+    # 非常重要：
+    #
+    # status 只负责查询。
+    #
+    # 这里绝对不调用 update_module_description。
+    #
+    # 否则 WebUI 每几秒刷新一次状态都会触发 ksud。
+    #
+
 
     echo "========== CF Server Monitor =========="
 
@@ -1056,24 +1061,29 @@ status() {
 
         echo "进程参数：${cmdline:-未知}"
 
-        runtime_debug=$(get_debug_runtime 2>/dev/null || true)
+        runtime_debug=$(get_runtime_debug)
 
         case "$runtime_debug" in
+
             1)
                 echo "实际 Debug：开启"
                 ;;
+
             0)
                 echo "实际 Debug：关闭"
                 ;;
+
             *)
                 echo "实际 Debug：未知"
                 ;;
+
         esac
 
     else
 
         echo "运行状态：已停止"
         echo "进程 PID：无"
+        echo "实际 Debug：无"
 
     fi
 
@@ -1171,69 +1181,52 @@ status() {
         echo "暂无日志。"
 
     fi
-
-
-    echo
-
-
-    update_module_description
 }
 
 
 case "${1:-}" in
 
     start)
-
         start
         ;;
 
     stop)
-
         stop
         ;;
 
     restart)
-
         restart
         ;;
 
     status)
-
         status
         ;;
 
     logs)
-
         show_logs
         ;;
 
     clear-logs)
-
         clear_logs
         ;;
 
     toggle-debug)
-
         toggle_debug
         ;;
 
     get-config)
-
         show_config
         ;;
 
     save-config)
-
         save_config "${2:-}"
         ;;
 
     runtime-debug)
-
-        get_debug_runtime
+        get_runtime_debug
         ;;
 
     pid)
-
         get_pid
         ;;
 
