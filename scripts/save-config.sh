@@ -1,7 +1,6 @@
 #!/system/bin/sh
 
 DATA_DIR="/data/adb/cf-server-monitor"
-
 CONFIG="$DATA_DIR/config.conf"
 TMP="$CONFIG.tmp.$$"
 
@@ -10,10 +9,10 @@ mkdir -p "$DATA_DIR" || {
     exit 1
 }
 
-input=$(cat)
+INPUT=$(cat)
 
-decoded=$(
-    printf '%s' "$input" |
+DECODED=$(
+    printf '%s' "$INPUT" |
         base64 -d 2>/dev/null
 ) || {
     echo "[错误] 无法解析配置数据"
@@ -24,8 +23,8 @@ SERVER_ID=""
 SECRET=""
 WORKER_URL=""
 
-COLLECT_INTERVAL=""
-REPORT_INTERVAL=""
+COLLECT_INTERVAL="0"
+REPORT_INTERVAL="60"
 
 CT_NODE=""
 CU_NODE=""
@@ -33,96 +32,148 @@ CM_NODE=""
 BD_NODE=""
 
 INTERFACE=""
+RESET_DAY="1"
 
-RESET_DAY=""
+CONNECTION_MODE="auto"
 
-CONNECTION_MODE=""
-
-AUTO_UPDATE=""
+AUTO_UPDATE="0"
 UPDATE_PROXY=""
 
-DEBUG=""
-LOG_MAX_SIZE_MB=""
-LOG_KEEP_COUNT=""
+DEBUG="0"
+LOG_MAX_SIZE_MB="5"
+LOG_KEEP_COUNT="3"
 
 
-while IFS='=' read -r key value; do
+while IFS='=' read -r KEY VALUE; do
 
-    case "$key" in
+    case "$KEY" in
 
         SERVER_ID)
-            SERVER_ID="$value"
+            SERVER_ID="$VALUE"
             ;;
 
         SECRET)
-            SECRET="$value"
+            SECRET="$VALUE"
             ;;
 
         WORKER_URL)
-            WORKER_URL="$value"
+            WORKER_URL="$VALUE"
             ;;
 
         COLLECT_INTERVAL)
-            COLLECT_INTERVAL="$value"
+            COLLECT_INTERVAL="$VALUE"
             ;;
 
         REPORT_INTERVAL)
-            REPORT_INTERVAL="$value"
+            REPORT_INTERVAL="$VALUE"
             ;;
 
         CT_NODE)
-            CT_NODE="$value"
+            CT_NODE="$VALUE"
             ;;
 
         CU_NODE)
-            CU_NODE="$value"
+            CU_NODE="$VALUE"
             ;;
 
         CM_NODE)
-            CM_NODE="$value"
+            CM_NODE="$VALUE"
             ;;
 
         BD_NODE)
-            BD_NODE="$value"
+            BD_NODE="$VALUE"
             ;;
 
         INTERFACE)
-            INTERFACE="$value"
+            INTERFACE="$VALUE"
             ;;
 
         RESET_DAY)
-            RESET_DAY="$value"
+            RESET_DAY="$VALUE"
             ;;
 
         CONNECTION_MODE)
-            CONNECTION_MODE="$value"
+            CONNECTION_MODE="$VALUE"
             ;;
 
         AUTO_UPDATE)
-            AUTO_UPDATE="$value"
+            AUTO_UPDATE="$VALUE"
             ;;
 
         UPDATE_PROXY)
-            UPDATE_PROXY="$value"
+            UPDATE_PROXY="$VALUE"
             ;;
 
         DEBUG)
-            DEBUG="$value"
+            DEBUG="$VALUE"
             ;;
 
         LOG_MAX_SIZE_MB)
-            LOG_MAX_SIZE_MB="$value"
+            LOG_MAX_SIZE_MB="$VALUE"
             ;;
 
         LOG_KEEP_COUNT)
-            LOG_KEEP_COUNT="$value"
+            LOG_KEEP_COUNT="$VALUE"
             ;;
 
     esac
 
 done <<EOF
-$decoded
+$DECODED
 EOF
+
+
+# 去除可能存在的双引号
+SERVER_ID=${SERVER_ID#\"}
+SERVER_ID=${SERVER_ID%\"}
+
+SECRET=${SECRET#\"}
+SECRET=${SECRET%\"}
+
+WORKER_URL=${WORKER_URL#\"}
+WORKER_URL=${WORKER_URL%\"}
+
+COLLECT_INTERVAL=${COLLECT_INTERVAL#\"}
+COLLECT_INTERVAL=${COLLECT_INTERVAL%\"}
+
+REPORT_INTERVAL=${REPORT_INTERVAL#\"}
+REPORT_INTERVAL=${REPORT_INTERVAL%\"}
+
+CT_NODE=${CT_NODE#\"}
+CT_NODE=${CT_NODE%\"}
+
+CU_NODE=${CU_NODE#\"}
+CU_NODE=${CU_NODE%\"}
+
+CM_NODE=${CM_NODE#\"}
+CM_NODE=${CM_NODE%\"}
+
+BD_NODE=${BD_NODE#\"}
+BD_NODE=${BD_NODE%\"}
+
+INTERFACE=${INTERFACE#\"}
+INTERFACE=${INTERFACE%\"}
+
+RESET_DAY=${RESET_DAY#\"}
+RESET_DAY=${RESET_DAY%\"}
+
+CONNECTION_MODE=${CONNECTION_MODE#\"}
+CONNECTION_MODE=${CONNECTION_MODE%\"}
+
+AUTO_UPDATE=${AUTO_UPDATE#\"}
+AUTO_UPDATE=${AUTO_UPDATE%\"}
+
+UPDATE_PROXY=${UPDATE_PROXY#\"}
+UPDATE_PROXY=${UPDATE_PROXY%\"}
+
+DEBUG=${DEBUG#\"}
+DEBUG=${DEBUG%\"}
+
+LOG_MAX_SIZE_MB=${LOG_MAX_SIZE_MB#\"}
+LOG_MAX_SIZE_MB=${LOG_MAX_SIZE_MB%\"}
+
+LOG_KEEP_COUNT=${LOG_KEEP_COUNT#\"}
+LOG_KEEP_COUNT=${LOG_KEEP_COUNT%\"}
 
 
 [ -n "$SERVER_ID" ] || {
@@ -142,77 +193,60 @@ EOF
 
 
 case "$COLLECT_INTERVAL" in
-
     ''|*[!0-9]*)
         echo "[错误] 采集间隔必须是数字"
         exit 1
         ;;
-
 esac
 
 
 case "$REPORT_INTERVAL" in
-
     ''|*[!0-9]*)
         echo "[错误] 上报间隔必须是数字"
         exit 1
         ;;
-
 esac
 
 
 case "$RESET_DAY" in
-
     ''|*[!0-9]*)
         RESET_DAY="1"
         ;;
-
 esac
 
 
 case "$CONNECTION_MODE" in
-
     auto|http)
         ;;
-
     *)
         echo "[错误] CONNECTION_MODE 只能是 auto 或 http"
         exit 1
         ;;
-
 esac
 
 
 case "$AUTO_UPDATE" in
-
     0|1)
         ;;
-
     *)
         AUTO_UPDATE="0"
         ;;
-
 esac
 
 
 case "$DEBUG" in
-
     0|1)
         ;;
-
     *)
         DEBUG="0"
         ;;
-
 esac
 
 
 case "$LOG_MAX_SIZE_MB" in
-
     ''|*[!0-9]*)
         LOG_MAX_SIZE_MB="5"
         ;;
-
 esac
 
 [ "$LOG_MAX_SIZE_MB" -gt 0 ] 2>/dev/null ||
@@ -220,11 +254,9 @@ esac
 
 
 case "$LOG_KEEP_COUNT" in
-
     ''|*[!0-9]*)
         LOG_KEEP_COUNT="3"
         ;;
-
 esac
 
 [ "$LOG_KEEP_COUNT" -gt 0 ] 2>/dev/null ||
@@ -299,7 +331,7 @@ escape_dq() {
 
     rm -f "$TMP"
 
-    echo "[错误] 无法写入临时配置"
+    echo "[错误] 无法写入配置文件"
 
     exit 1
 }

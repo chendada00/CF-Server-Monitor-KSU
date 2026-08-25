@@ -38,11 +38,8 @@ body {
 
 .card {
     background: #1d1d1f;
-
     border-radius: 16px;
-
     padding: 16px;
-
     margin-bottom: 14px;
 }
 
@@ -61,21 +58,16 @@ h2 {
 
 .row {
     display: flex;
-
     gap: 8px;
-
     flex-wrap: wrap;
 }
 
 button {
     border: 0;
-
     border-radius: 10px;
-
     padding: 11px 14px;
 
     background: #3a3a3c;
-
     color: #fff;
 
     font-size: 15px;
@@ -100,11 +92,9 @@ select {
     padding: 12px;
 
     border: 1px solid #444;
-
     border-radius: 10px;
 
     background: #2c2c2e;
-
     color: #fff;
 
     font-size: 16px;
@@ -112,17 +102,14 @@ select {
 
 label {
     display: block;
-
     margin: 12px 0 6px;
 }
 
 pre {
     white-space: pre-wrap;
-
     word-break: break-word;
 
     max-height: 420px;
-
     overflow: auto;
 
     margin: 0;
@@ -130,7 +117,6 @@ pre {
 
 .badge {
     font-weight: 700;
-
     font-size: 16px;
 }
 
@@ -144,15 +130,12 @@ pre {
 
 .muted {
     color: #aaa;
-
     font-size: 13px;
 }
 
 .small {
     color: #aaa;
-
     font-size: 12px;
-
     margin-top: 6px;
 }
 
@@ -162,13 +145,10 @@ pre {
 
 .switch-row {
     display: flex;
-
     align-items: center;
-
     justify-content: space-between;
 
     gap: 12px;
-
     margin-top: 12px;
 }
 
@@ -181,15 +161,12 @@ pre {
     height: 30px;
 
     position: relative;
-
     appearance: none;
 
     background: #555;
-
     border-radius: 20px;
 
     cursor: pointer;
-
     transition: .2s;
 }
 
@@ -209,7 +186,6 @@ pre {
     left: 3px;
 
     background: #fff;
-
     border-radius: 50%;
 
     transition: .2s;
@@ -220,9 +196,7 @@ pre {
 }
 
 #loadingOverlay {
-
     position: fixed;
-
     inset: 0;
 
     z-index: 9999;
@@ -230,7 +204,6 @@ pre {
     display: none;
 
     align-items: center;
-
     justify-content: center;
 
     padding: 24px;
@@ -245,9 +218,7 @@ pre {
 }
 
 .loadingBox {
-
     width: 100%;
-
     max-width: 330px;
 
     padding: 24px;
@@ -260,7 +231,6 @@ pre {
 }
 
 .spinner {
-
     width: 42px;
     height: 42px;
 
@@ -276,14 +246,11 @@ pre {
 }
 
 #loadingText {
-
     font-size: 16px;
-
     font-weight: 600;
 }
 
 #loadingDetail {
-
     margin-top: 8px;
 
     color: #aaa;
@@ -298,6 +265,7 @@ pre {
     to {
         transform: rotate(360deg);
     }
+
 }
 
 </style>
@@ -307,17 +275,22 @@ pre {
 const MODDIR =
     '/data/adb/modules/cf-server-monitor';
 
+
 const MANAGER =
     `${MODDIR}/scripts/manager.sh`;
+
 
 const CONFIG =
     '/data/adb/cf-server-monitor/config.conf';
 
+
 const SAVER =
     `${MODDIR}/scripts/save-config.sh`;
 
+
 const ACTION_LOG =
     '/data/adb/cf-server-monitor/webui-action.log';
+
 
 const $ =
     id => document.getElementById(id);
@@ -325,13 +298,16 @@ const $ =
 
 let exec;
 
+
 try {
 
     const kernelsu =
         await import('./kernelsu.js');
 
+
     exec =
         kernelsu.exec;
+
 
     if (
         typeof exec !== 'function'
@@ -344,18 +320,9 @@ try {
 
 } catch (error) {
 
-    document.addEventListener(
-        'DOMContentLoaded',
-        function () {
+    window.__ksuInitError =
+        error;
 
-            $('message').textContent =
-                'WebUI 初始化失败：\n' +
-                (
-                    error?.message ||
-                    String(error)
-                );
-        }
-    );
 }
 
 
@@ -378,26 +345,26 @@ async function run(command) {
     ) {
 
         throw new Error(
+            window.__ksuInitError?.message ||
             'KernelSU WebUI API 不可用'
         );
     }
 
+
     const result =
         await exec(command);
+
 
     const stdout =
         result?.stdout || '';
 
+
     const stderr =
         result?.stderr || '';
 
-    const output =
-        [stdout, stderr]
-            .filter(Boolean)
-            .join('\n')
-            .trim();
 
     return {
+
         errno:
             result?.errno ?? 0,
 
@@ -405,35 +372,86 @@ async function run(command) {
 
         stderr,
 
-        output
+        output:
+            [stdout, stderr]
+                .filter(Boolean)
+                .join('\n')
+                .trim()
+
     };
 }
 
 
+/*
+ * 同时支持：
+ *
+ * SERVER_ID="123"
+ *
+ * SERVER_ID=123
+ */
 function parseConfig(text) {
 
     const result = {};
 
+
     for (
         const line of
-        text.split(/\r?\n/)
+        String(text || '')
+            .split(/\r?\n/)
     ) {
 
+        const trimmed =
+            line.trim();
+
+
+        if (
+            !trimmed ||
+            trimmed.startsWith('#')
+        ) {
+            continue;
+        }
+
+
         const match =
-            line.match(
-                /^([A-Z_]+)="(.*)"$/
+            trimmed.match(
+                /^([A-Z_]+)=(.*)$/
             );
+
 
         if (!match) {
             continue;
         }
 
-        result[match[1]] =
-            match[2].replace(
+
+        let value =
+            match[2].trim();
+
+
+        if (
+            value.length >= 2 &&
+            value.startsWith('"') &&
+            value.endsWith('"')
+        ) {
+
+            value =
+                value.substring(
+                    1,
+                    value.length - 1
+                );
+        }
+
+
+        value =
+            value.replace(
                 /\\(["\\$`])/g,
                 '$1'
             );
+
+
+        result[match[1]] =
+            value;
     }
+
 
     return result;
 }
@@ -445,13 +463,18 @@ function b64Utf8(text) {
         new TextEncoder()
             .encode(text);
 
+
     let binary = '';
 
-    for (const byte of bytes) {
+
+    for (
+        const byte of bytes
+    ) {
 
         binary +=
             String.fromCharCode(byte);
     }
+
 
     return btoa(binary);
 }
@@ -470,10 +493,14 @@ function showLoading(
 ) {
 
     $('loadingText').textContent =
-        text || '正在执行操作...';
+        text ||
+        '正在执行操作...';
+
 
     $('loadingDetail').textContent =
-        detail || '请稍候...';
+        detail ||
+        '请稍候...';
+
 
     $('loadingOverlay')
         .classList
@@ -496,7 +523,9 @@ function updateLoading(text) {
 }
 
 
-function setButtonsDisabled(disabled) {
+function setButtonsDisabled(
+    disabled
+) {
 
     document
         .querySelectorAll('button')
@@ -519,18 +548,21 @@ async function refreshStatus() {
                 `${shellQuote(MANAGER)} status`
             );
 
+
         const output =
             result.output;
 
+
         const running =
-            output.includes(
-                '运行状态：运行中'
-            );
+            /运行状态：运行中/
+                .test(output);
+
 
         $('status').textContent =
             running
                 ? '● 探针运行中'
                 : '● 探针已停止';
+
 
         $('status').className =
             'badge ' +
@@ -540,19 +572,26 @@ async function refreshStatus() {
                     : 'stopped'
             );
 
+
         $('statusDetail').textContent =
             output;
+
 
     } catch (error) {
 
         $('status').textContent =
             '● 状态读取失败';
 
+
         $('status').className =
             'badge stopped';
 
+
         $('statusDetail').textContent =
-            String(error);
+            String(
+                error?.message ||
+                error
+            );
     }
 }
 
@@ -562,64 +601,70 @@ async function loadConfig() {
     const result =
         await run(
             'cat ' +
-            shellQuote(CONFIG)
+            shellQuote(CONFIG) +
+            ' 2>&1'
         );
+
+
+    if (
+        result.errno !== 0
+    ) {
+
+        throw new Error(
+            '无法读取配置文件：\n' +
+            CONFIG +
+            '\n\n' +
+            result.output
+        );
+    }
+
 
     const config =
         parseConfig(
             result.stdout
         );
 
+
     $('serverId').value =
         config.SERVER_ID || '';
+
 
     $('secret').value =
         config.SECRET || '';
 
+
     $('workerUrl').value =
         config.WORKER_URL || '';
+
 
     $('collectInterval').value =
         config.COLLECT_INTERVAL || '0';
 
+
     $('reportInterval').value =
         config.REPORT_INTERVAL || '60';
 
-    $('resetDay').value =
-        config.RESET_DAY || '1';
 
     $('connectionMode').value =
         config.CONNECTION_MODE || 'auto';
 
-    $('ctNode').value =
-        config.CT_NODE || '';
-
-    $('cuNode').value =
-        config.CU_NODE || '';
-
-    $('cmNode').value =
-        config.CM_NODE || '';
-
-    $('bdNode').value =
-        config.BD_NODE || '';
-
-    $('interface').value =
-        config.INTERFACE || '';
-
-    $('autoUpdate').value =
-        config.AUTO_UPDATE || '0';
-
-    $('updateProxy').value =
-        config.UPDATE_PROXY || '';
 
     $('debug').checked =
         config.DEBUG === '1';
 
+
     $('logMaxSize').value =
         config.LOG_MAX_SIZE_MB || '5';
 
+
     $('logKeepCount').value =
         config.LOG_KEEP_COUNT || '3';
+
+
+    setMessage(
+        '配置读取成功：' +
+        CONFIG
+    );
 }
 
 
@@ -639,23 +684,7 @@ async function saveConfig(
 
         `REPORT_INTERVAL=${$('reportInterval').value}`,
 
-        `RESET_DAY=${$('resetDay').value}`,
-
         `CONNECTION_MODE=${$('connectionMode').value}`,
-
-        `CT_NODE=${$('ctNode').value.trim()}`,
-
-        `CU_NODE=${$('cuNode').value.trim()}`,
-
-        `CM_NODE=${$('cmNode').value.trim()}`,
-
-        `BD_NODE=${$('bdNode').value.trim()}`,
-
-        `INTERFACE=${$('interface').value.trim()}`,
-
-        `AUTO_UPDATE=${$('autoUpdate').value}`,
-
-        `UPDATE_PROXY=${$('updateProxy').value.trim()}`,
 
         `DEBUG=${$('debug').checked ? '1' : '0'}`,
 
@@ -665,15 +694,19 @@ async function saveConfig(
 
     ].join('\n');
 
+
     const encoded =
         b64Utf8(payload);
 
+
     setButtonsDisabled(true);
+
 
     showLoading(
         '正在保存配置...',
-        '正在写入配置文件'
+        '正在写入运行时配置'
     );
+
 
     try {
 
@@ -683,32 +716,35 @@ async function saveConfig(
                 `${shellQuote(SAVER)}`
             );
 
+
         if (
+            result.errno !== 0 ||
             !result.output.includes('OK')
         ) {
 
             throw new Error(
                 result.output ||
-                '保存失败'
+                '保存配置失败'
             );
         }
+
+
+        await loadConfig();
+
 
         if (restart) {
 
             await backgroundAction(
-                'restart',
-                false
+                'restart'
             );
 
         } else {
 
             setMessage(
-                '配置保存成功。\n' +
-                '部分设置需要重启探针后才会生效。'
+                '配置保存成功。'
             );
         }
 
-        await refreshStatus();
 
     } catch (error) {
 
@@ -720,6 +756,7 @@ async function saveConfig(
             )
         );
 
+
     } finally {
 
         hideLoading();
@@ -730,25 +767,24 @@ async function saveConfig(
 
 
 async function backgroundAction(
-    name,
-    manageUi = true
+    name
 ) {
 
-    if (manageUi) {
+    setButtonsDisabled(true);
 
-        setButtonsDisabled(true);
 
-        showLoading(
-            '正在执行：' + name,
-            '正在启动后台任务...'
-        );
-    }
+    showLoading(
+        '正在执行：' + name,
+        '请稍候...'
+    );
+
 
     try {
 
         const command =
             `${shellQuote(MANAGER)} ${shellQuote(name)} ` +
             `> ${shellQuote(ACTION_LOG)} 2>&1`;
+
 
         const background =
             '/system/bin/sh -c ' +
@@ -757,35 +793,48 @@ async function backgroundAction(
                 ' & echo $!'
             );
 
+
         const start =
             await run(background);
 
+
         const pid =
-            String(start.stdout || '')
-                .trim()
-                .split(/\s+/)
-                .pop();
+            String(
+                start.stdout || ''
+            )
+            .trim()
+            .split(/\s+/)
+            .pop();
+
 
         if (
-            !/^\d+$/.test(pid || '')
+            !/^\d+$/.test(
+                pid || ''
+            )
         ) {
 
             throw new Error(
                 start.output ||
-                '无法启动后台操作'
+                '无法启动后台任务'
             );
         }
 
-        let lastOutput =
-            '';
 
         const startTime =
             Date.now();
 
-        const maxWait =
-            30000;
 
-        while (true) {
+        while (
+            Date.now() -
+            startTime <
+            30000
+        ) {
+
+            const alive =
+                await run(
+                    `kill -0 ${pid} 2>/dev/null`
+                );
+
 
             const logResult =
                 await run(
@@ -794,57 +843,24 @@ async function backgroundAction(
                     ' 2>/dev/null'
                 );
 
-            const output =
-                logResult.stdout ||
-                '';
 
             if (
-                output !== lastOutput
+                logResult.stdout
             ) {
 
-                lastOutput =
-                    output;
-
                 setMessage(
-                    output ||
-                    '正在执行...'
-                );
-
-                const lines =
-                    output
-                        .trim()
-                        .split(/\r?\n/);
-
-                updateLoading(
-                    lines
-                        .slice(-2)
-                        .join('\n')
+                    logResult.stdout
                 );
             }
 
-            const alive =
-                await run(
-                    `kill -0 ${pid} 2>/dev/null`
-                );
 
             if (
                 alive.errno !== 0
             ) {
-                break;
-            }
-
-            if (
-                Date.now() -
-                startTime >
-                maxWait
-            ) {
-
-                updateLoading(
-                    '操作仍在后台执行，停止页面等待。'
-                );
 
                 break;
             }
+
 
             await new Promise(
                 resolve =>
@@ -855,45 +871,29 @@ async function backgroundAction(
             );
         }
 
-        const finalResult =
-            await run(
-                'cat ' +
-                shellQuote(ACTION_LOG) +
-                ' 2>/dev/null'
-            );
-
-        if (
-            finalResult.stdout
-        ) {
-
-            setMessage(
-                finalResult.stdout
-            );
-        }
 
         await refreshStatus();
 
+
         await showLogs();
+
 
     } catch (error) {
 
         setMessage(
             '[操作失败]\n' +
             (
-                error?.stack ||
                 error?.message ||
                 String(error)
             )
         );
 
+
     } finally {
 
-        if (manageUi) {
+        hideLoading();
 
-            hideLoading();
-
-            setButtonsDisabled(false);
-        }
+        setButtonsDisabled(false);
     }
 }
 
@@ -904,6 +904,7 @@ window.action =
         await backgroundAction(
             name
         );
+
     };
 
 
@@ -925,9 +926,11 @@ window.showLogs =
                     `${shellQuote(MANAGER)} logs`
                 );
 
+
             $('logs').textContent =
                 result.output ||
                 '暂无日志。';
+
 
         } catch (error) {
 
@@ -946,8 +949,10 @@ window.clearLogs =
                 '确定要清空全部日志吗？'
             )
         ) {
+
             return;
         }
+
 
         await backgroundAction(
             'clear-logs'
@@ -961,6 +966,7 @@ window.toggleDebug =
         await backgroundAction(
             'toggle-debug'
         );
+
 
         await loadConfig();
     };
@@ -978,18 +984,24 @@ document.addEventListener(
 
             await showLogs();
 
+
             setInterval(
                 refreshStatus,
-                10000
+                5000
             );
+
 
         } catch (error) {
 
             setMessage(
                 '初始化失败：\n' +
-                String(error)
+                (
+                    error?.message ||
+                    String(error)
+                )
             );
         }
+
     }
 );
 
@@ -997,7 +1009,9 @@ document.addEventListener(
 
 </head>
 
+
 <body>
+
 
 <div id="loadingOverlay">
 
@@ -1024,6 +1038,7 @@ document.addEventListener(
         CF Server Monitor
     </h1>
 
+
     <div
         id="status"
         class="badge">
@@ -1031,6 +1046,7 @@ document.addEventListener(
         加载中...
 
     </div>
+
 
     <pre
         id="statusDetail"
@@ -1046,6 +1062,7 @@ document.addEventListener(
         探针控制
     </h2>
 
+
     <div class="row">
 
         <button
@@ -1056,12 +1073,15 @@ document.addEventListener(
 
         </button>
 
+
         <button
+            class="danger"
             onclick="action('stop')">
 
             停止
 
         </button>
+
 
         <button
             onclick="action('restart')">
@@ -1069,6 +1089,7 @@ document.addEventListener(
             重启
 
         </button>
+
 
         <button
             onclick="refreshStatus()">
@@ -1088,11 +1109,13 @@ document.addEventListener(
         调试模式
     </h2>
 
+
     <div class="switch-row">
 
         <label>
             开启详细调试日志
         </label>
+
 
         <input
             id="debug"
@@ -1101,12 +1124,13 @@ document.addEventListener(
 
     </div>
 
+
     <div class="small">
 
-        开启后会记录更多网络、上报和探测信息，
-        日志增长速度也会明显增加。
+        开启后会记录更多网络、上报和探测信息。
 
     </div>
+
 
     <div
         class="row"
@@ -1130,18 +1154,21 @@ document.addEventListener(
         连接配置
     </h2>
 
+
     <label>
         Agent ID
     </label>
 
-<input
-    id="serverId"
-    autocomplete="off">
+
+    <input
+        id="serverId"
+        autocomplete="off">
 
 
     <label>
         Secret
     </label>
+
 
     <input
         id="secret"
@@ -1153,25 +1180,28 @@ document.addEventListener(
         服务端地址
     </label>
 
-<input
-    id="workerUrl"
-    type="url"
-    autocomplete="off">
+
+    <input
+        id="workerUrl"
+        type="url"
+        autocomplete="off">
 
 
     <label>
         上报间隔（秒）
     </label>
 
-<input
-    id="reportInterval"
-    type="number"
-    min="0">
+
+    <input
+        id="reportInterval"
+        type="number"
+        min="0">
 
 
     <label>
         采集间隔（秒）
     </label>
+
 
     <input
         id="collectInterval"
@@ -1182,6 +1212,7 @@ document.addEventListener(
     <label>
         连接方式
     </label>
+
 
     <select id="connectionMode">
 
@@ -1207,6 +1238,7 @@ document.addEventListener(
 
         </button>
 
+
         <button
             class="primary"
             onclick="saveConfig(true)">
@@ -1226,9 +1258,11 @@ document.addEventListener(
         日志管理
     </h2>
 
+
     <label>
         单个日志最大大小（MB）
     </label>
+
 
     <input
         id="logMaxSize"
@@ -1240,20 +1274,12 @@ document.addEventListener(
         保留历史日志数量
     </label>
 
+
     <input
         id="logKeepCount"
         type="number"
         min="1"
         max="20">
-
-
-    <div class="small">
-
-        超过最大大小后自动轮转。
-        例如 5MB、保留 3 个，
-        最多大约占用 20MB。
-
-    </div>
 
 
     <div
@@ -1267,6 +1293,7 @@ document.addEventListener(
 
         </button>
 
+
         <button
             class="danger"
             onclick="clearLogs()">
@@ -1277,11 +1304,19 @@ document.addEventListener(
 
     </div>
 
+</div>
+
+
+<div class="card">
+
+    <h2>
+        消息
+    </h2>
+
+
     <pre
-        id="logs">
-
-正在加载日志...
-
+        id="message"
+        class="muted">
     </pre>
 
 </div>
@@ -1290,12 +1325,15 @@ document.addEventListener(
 <div class="card">
 
     <h2>
-        操作结果
+        日志
     </h2>
 
-    <pre id="message"></pre>
+
+    <pre id="logs">
+    </pre>
 
 </div>
+
 
 </body>
 

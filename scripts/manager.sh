@@ -6,13 +6,12 @@ BIN="$MODDIR/bin/cf-probe"
 
 DATADIR="/data/adb/cf-server-monitor"
 
-# 运行时真正使用的配置
 CONFIG="$DATADIR/config.conf"
 
-# 模块内仅作为默认模板
 DEFAULT_CONFIG="$MODDIR/config/config.conf"
 
 PIDFILE="$DATADIR/cf-probe.pid"
+
 LOGDIR="$DATADIR/logs"
 LOGFILE="$LOGDIR/cf-probe.log"
 
@@ -20,11 +19,11 @@ ACTION_LOG="$DATADIR/webui-action.log"
 
 KSU_BUSYBOX="/data/adb/ksu/bin/busybox"
 
-# Android 环境下强制给探针提供 DNS。
 CF_PROBE_UPDATE_DNS_SERVER="223.5.5.5"
 
 DEFAULT_LOG_MAX_SIZE_MB=5
 DEFAULT_LOG_KEEP_COUNT=3
+
 
 mkdir -p "$DATADIR" "$LOGDIR"
 
@@ -40,7 +39,11 @@ now() {
 
 
 write_manager_log() {
-    printf '%s %s\n' "[$(now)]" "$*" >> "$LOGFILE"
+
+    printf '%s %s\n' \
+        "[$(now)]" \
+        "$*" \
+        >> "$LOGFILE"
 }
 
 
@@ -50,12 +53,14 @@ init_config() {
         return 0
     fi
 
+
     if [ ! -f "$DEFAULT_CONFIG" ]; then
 
         log "[错误] 找不到默认配置文件：$DEFAULT_CONFIG"
 
         return 1
     fi
+
 
     cp "$DEFAULT_CONFIG" "$CONFIG" || {
 
@@ -64,24 +69,8 @@ init_config() {
         return 1
     }
 
+
     chmod 600 "$CONFIG" 2>/dev/null || true
-}
-
-
-get_config_value() {
-
-    key="$1"
-
-    [ -f "$CONFIG" ] || return 1
-
-    value=$(
-        sed -n \
-            "s/^${key}=\"\\(.*\\)\"$/\\1/p" \
-            "$CONFIG" |
-        tail -n 1
-    )
-
-    printf '%s' "$value"
 }
 
 
@@ -89,90 +78,119 @@ load_config() {
 
     init_config || return 1
 
+
+    if [ ! -r "$CONFIG" ]; then
+
+        log "[错误] 配置文件不可读：$CONFIG"
+
+        return 1
+    fi
+
+
     # shellcheck disable=SC1090
     . "$CONFIG"
 
-    [ -n "${SERVER_ID:-}" ] || {
 
-        log "[错误] Server ID 不能为空"
-
-        return 1
-    }
-
-    [ -n "${SECRET:-}" ] || {
-
-        log "[错误] Secret 不能为空"
-
-        return 1
-    }
-
-    [ -n "${WORKER_URL:-}" ] || {
-
-        log "[错误] Worker URL 不能为空"
-
-        return 1
-    }
+    SERVER_ID="${SERVER_ID:-}"
+    SECRET="${SECRET:-}"
+    WORKER_URL="${WORKER_URL:-}"
 
     COLLECT_INTERVAL="${COLLECT_INTERVAL:-0}"
     REPORT_INTERVAL="${REPORT_INTERVAL:-60}"
 
+    CT_NODE="${CT_NODE:-}"
+    CU_NODE="${CU_NODE:-}"
+    CM_NODE="${CM_NODE:-}"
+    BD_NODE="${BD_NODE:-}"
+
+    INTERFACE="${INTERFACE:-}"
+
+    RESET_DAY="${RESET_DAY:-1}"
+
     CONNECTION_MODE="${CONNECTION_MODE:-auto}"
+
+    AUTO_UPDATE="${AUTO_UPDATE:-0}"
+    UPDATE_PROXY="${UPDATE_PROXY:-}"
 
     DEBUG="${DEBUG:-0}"
 
     LOG_MAX_SIZE_MB="${LOG_MAX_SIZE_MB:-$DEFAULT_LOG_MAX_SIZE_MB}"
     LOG_KEEP_COUNT="${LOG_KEEP_COUNT:-$DEFAULT_LOG_KEEP_COUNT}"
 
-    case "$DEBUG" in
-        0|1) ;;
-        *) DEBUG=0 ;;
-    esac
 
-    case "$LOG_MAX_SIZE_MB" in
-        ''|*[!0-9]*)
-            LOG_MAX_SIZE_MB="$DEFAULT_LOG_MAX_SIZE_MB"
-            ;;
-    esac
+    [ -n "$SERVER_ID" ] || {
 
-    case "$LOG_KEEP_COUNT" in
-        ''|*[!0-9]*)
-            LOG_KEEP_COUNT="$DEFAULT_LOG_KEEP_COUNT"
-            ;;
-    esac
+        log "[错误] Server ID 不能为空"
+
+        return 1
+    }
+
+
+    [ -n "$SECRET" ] || {
+
+        log "[错误] Secret 不能为空"
+
+        return 1
+    }
+
+
+    [ -n "$WORKER_URL" ] || {
+
+        log "[错误] Worker URL 不能为空"
+
+        return 1
+    }
 }
+
 
 get_ssl_cert_dir() {
 
     if [ -d "/apex/com.android.conscrypt/cacerts" ]; then
-        printf '%s' "/apex/com.android.conscrypt/cacerts"
+
+        printf '%s' \
+            "/apex/com.android.conscrypt/cacerts"
+
         return
     fi
 
+
     if [ -d "/system/etc/security/cacerts" ]; then
-        printf '%s' "/system/etc/security/cacerts"
+
+        printf '%s' \
+            "/system/etc/security/cacerts"
+
         return
     fi
+
 
     printf '%s' ""
 }
+
 
 pid_alive() {
 
     pid="$1"
 
-    [ -n "$pid" ] || return 1
+
+    [ -n "$pid" ] ||
+        return 1
+
 
     case "$pid" in
+
         ''|*[!0-9]*)
             return 1
             ;;
+
     esac
 
 
-    [ "$pid" -gt 0 ] || return 1
+    [ "$pid" -gt 0 ] ||
+        return 1
 
 
-    [ -r "/proc/$pid/cmdline" ] || return 1
+    [ -r "/proc/$pid/cmdline" ] ||
+        return 1
 
 
     cmdline=$(
@@ -195,11 +213,31 @@ pid_alive() {
     esac
 }
 
+
+find_probe_pid() {
+
+    if [ -x "$KSU_BUSYBOX" ]; then
+
+        "$KSU_BUSYBOX" pgrep -f \
+            "$BIN" \
+            2>/dev/null |
+            head -n 1
+
+        return
+    fi
+
+
+    pidof cf-probe 2>/dev/null |
+        awk '{print $1}'
+}
+
+
 get_pid() {
 
     if [ -f "$PIDFILE" ]; then
 
         pid=$(cat "$PIDFILE" 2>/dev/null)
+
 
         case "$pid" in
 
@@ -217,11 +255,9 @@ get_pid() {
 
             return 0
         fi
-
     fi
 
 
-    # PID 文件失效时主动寻找真正的 cf-probe
     pid=$(find_probe_pid)
 
 
@@ -234,69 +270,70 @@ get_pid() {
     fi
 
 
-    # 清理失效 PID 文件
     rm -f "$PIDFILE"
 
     return 1
 }
 
-find_probe_pid() {
-
-    if [ -x "$KSU_BUSYBOX" ]; then
-
-        "$KSU_BUSYBOX" pgrep -f \
-            "$BIN" \
-            2>/dev/null \
-            | head -n 1
-
-        return
-    fi
-
-    pidof cf-probe 2>/dev/null |
-        awk '{print $1}'
-}
 
 is_running() {
 
     get_pid >/dev/null 2>&1
 }
 
+
 get_file_size() {
 
     file="$1"
 
+
     [ -f "$file" ] || {
+
         printf '0'
+
         return
     }
+
 
     wc -c < "$file" 2>/dev/null |
         tr -d ' '
 }
+
 
 rotate_logs() {
 
     load_config >/dev/null 2>&1 ||
         return 0
 
+
     [ -f "$LOGFILE" ] ||
         return 0
 
-    max_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
 
-    [ "$max_bytes" -gt 0 ] ||
+    max_bytes=$(
+        echo "$LOG_MAX_SIZE_MB * 1024 * 1024" |
+            awk '{print $1 * $3}'
+    )
+
+
+    [ "$max_bytes" -gt 0 ] 2>/dev/null ||
         return 0
 
+
     current_size=$(get_file_size "$LOGFILE")
+
 
     [ "$current_size" -lt "$max_bytes" ] &&
         return 0
 
+
     i="$LOG_KEEP_COUNT"
+
 
     while [ "$i" -gt 1 ]; do
 
         prev=$((i - 1))
+
 
         if [ -f "$LOGFILE.$prev" ]; then
 
@@ -304,11 +341,13 @@ rotate_logs() {
                 "$LOGFILE.$prev" \
                 "$LOGFILE.$i" \
                 2>/dev/null || true
-
         fi
 
-        i=$prev
+
+        i="$prev"
+
     done
+
 
     if [ -f "$LOGFILE" ]; then
 
@@ -316,22 +355,14 @@ rotate_logs() {
             "$LOGFILE" \
             "$LOGFILE.1" \
             2>/dev/null || true
-
     fi
 
-    : > "$LOGFILE"
 
-    printf '%s\n' \
-        "========================================" \
-        "[$(now)] 日志已自动轮转" \
-        "原因：日志超过 ${LOG_MAX_SIZE_MB}MB" \
-        "========================================" \
-        >> "$LOGFILE"
+    : > "$LOGFILE"
 }
 
-clear_logs() {
 
-    rotate_logs
+clear_logs() {
 
     : > "$LOGFILE"
 
@@ -341,6 +372,7 @@ clear_logs() {
 
     update_module_description
 }
+
 
 update_module_description() {
 
@@ -353,17 +385,22 @@ update_module_description() {
         desc="● 探针已停止"
     fi
 
+
     if [ -f "$CONFIG" ]; then
 
         # shellcheck disable=SC1090
         . "$CONFIG" 2>/dev/null || true
 
-        desc="$desc | 上报=${INTERVAL:-60}秒"
+
+        desc="$desc | 上报=${REPORT_INTERVAL:-60}秒"
+
 
         if [ "${DEBUG:-0}" = "1" ]; then
+
             desc="$desc | 调试已开启"
         fi
     fi
+
 
     if command -v ksud >/dev/null 2>&1; then
 
@@ -381,10 +418,12 @@ update_module_description() {
     fi
 }
 
+
 validate_config() {
 
     load_config ||
         return 1
+
 
     case "$REPORT_INTERVAL" in
 
@@ -425,9 +464,11 @@ validate_config() {
     esac
 }
 
+
 start() {
 
     rotate_logs
+
 
     if pid=$(get_pid); then
 
@@ -439,28 +480,34 @@ start() {
         return 0
     fi
 
+
     rm -f "$PIDFILE"
+
 
     [ -x "$BIN" ] || {
 
-        log "[错误] 找不到探针程序或没有执行权限："
-        log "$BIN"
+        log "[错误] 找不到探针程序：$BIN"
 
         return 1
     }
 
+
     validate_config ||
         return 1
 
+
     SSL_CERT_DIR="$(get_ssl_cert_dir)"
 
+
     if [ "$DEBUG" = "1" ]; then
+
         DEBUG_ARG="-debug=1"
-        DEBUG_TEXT="已开启"
+
     else
+
         DEBUG_ARG="-debug=0"
-        DEBUG_TEXT="已关闭"
     fi
+
 
     printf '%s\n' \
         "" \
@@ -470,17 +517,15 @@ start() {
         "========================================" \
         "[管理器] Agent ID=$SERVER_ID" \
         "[管理器] 服务地址=$WORKER_URL" \
-        "[管理器] 上报间隔=${INTERVAL}秒" \
+        "[管理器] 上报间隔=${REPORT_INTERVAL}秒" \
         "[管理器] 采集间隔=${COLLECT_INTERVAL}秒" \
         "[管理器] 连接模式=$CONNECTION_MODE" \
-        "[管理器] 调试日志=$DEBUG_TEXT" \
         "[管理器] DNS=$CF_PROBE_UPDATE_DNS_SERVER" \
-        "[管理器] CA目录=${SSL_CERT_DIR:-未找到}" \
         >> "$LOGFILE"
 
+
     log "正在启动探针..."
-    log "服务地址：$WORKER_URL"
-    log "调试日志：$DEBUG_TEXT"
+
 
     if [ -x "$KSU_BUSYBOX" ]; then
 
@@ -503,9 +548,12 @@ start() {
             >> "$LOGFILE" 2>&1 < /dev/null &
     fi
 
+
     pid=$!
 
+
     sleep 2
+
 
     if pid_alive "$pid"; then
 
@@ -519,9 +567,12 @@ start() {
         return 0
     fi
 
+
     fallback_pid=$(find_probe_pid)
 
-    if [ -n "$fallback_pid" ]; then
+
+    if [ -n "$fallback_pid" ] &&
+        pid_alive "$fallback_pid"; then
 
         printf '%s\n' "$fallback_pid" > "$PIDFILE"
 
@@ -533,6 +584,7 @@ start() {
         return 0
     fi
 
+
     log "[错误] 探针启动失败，请查看日志。"
 
     update_module_description
@@ -540,56 +592,48 @@ start() {
     return 1
 }
 
+
 stop() {
 
-    if ! pid=$(get_pid); then
-
-        fallback_pid=$(find_probe_pid)
-
-        if [ -n "$fallback_pid" ]; then
-            pid="$fallback_pid"
-        else
-
-            rm -f "$PIDFILE"
+    pid=$(get_pid 2>/dev/null || true)
 
 
-            fallback_pid=$(find_probe_pid)
+    if [ -z "$pid" ]; then
 
-            if [ -n "$fallback_pid" ] &&
-                pid_alive "$fallback_pid"; then
+        rm -f "$PIDFILE"
 
-                log "[错误] 探针仍然在运行。"
+        log "探针已停止。"
 
-                update_module_description
+        update_module_description
 
-                return 1
-            fi
-
-
-            log "探针已停止。"
-
-            update_module_description
-
-            return 0
-        fi
+        return 0
     fi
+
 
     log "正在停止探针..."
     log "PID=$pid"
 
+
     kill "$pid" 2>/dev/null || true
 
+
     i=0
+
 
     while pid_alive "$pid"; do
 
         i=$((i + 1))
 
-        [ "$i" -ge 10 ] &&
+
+        if [ "$i" -ge 10 ]; then
             break
+        fi
+
 
         sleep 1
+
     done
+
 
     if pid_alive "$pid"; then
 
@@ -600,52 +644,73 @@ stop() {
         sleep 1
     fi
 
+
     rm -f "$PIDFILE"
 
-    if pid_alive "$pid"; then
 
-        log "[错误] 无法停止探针。"
+    # 再次检查真正的 cf-probe
+    remaining=$(find_probe_pid)
+
+
+    if [ -n "$remaining" ] &&
+        pid_alive "$remaining"; then
+
+        log "[错误] 探针仍然在运行。"
 
         update_module_description
 
         return 1
     fi
 
+
     log "探针已停止。"
 
     update_module_description
+
+    return 0
 }
+
 
 restart() {
 
     log "正在重启探针..."
 
+
     stop ||
         return 1
 
+
     sleep 1
+
 
     start
 }
+
 
 toggle_debug() {
 
     load_config ||
         return 1
 
+
     case "$DEBUG" in
+
         1)
             NEW_DEBUG=0
             ;;
+
         *)
             NEW_DEBUG=1
             ;;
+
     esac
+
 
     sed \
         -i \
         "s/^DEBUG=.*/DEBUG=\"$NEW_DEBUG\"/" \
         "$CONFIG"
+
 
     if ! grep -q '^DEBUG=' "$CONFIG"; then
 
@@ -653,6 +718,7 @@ toggle_debug() {
             "$NEW_DEBUG" \
             >> "$CONFIG"
     fi
+
 
     if [ "$NEW_DEBUG" = "1" ]; then
 
@@ -663,20 +729,22 @@ toggle_debug() {
         log "调试日志已关闭。"
     fi
 
+
     if is_running; then
 
-        log "正在重启探针以应用调试设置..."
-
         restart
+
     else
 
         update_module_description
     fi
 }
 
+
 status() {
 
     echo "========== 当前状态 =========="
+
 
     if pid=$(get_pid); then
 
@@ -689,33 +757,56 @@ status() {
         echo "进程 PID：无"
     fi
 
+
     echo
+
 
     if [ -f "$CONFIG" ]; then
 
         # shellcheck disable=SC1090
         . "$CONFIG" 2>/dev/null || true
 
+
         echo "========== 当前配置 =========="
 
+        echo "配置文件：$CONFIG"
+
         echo "Server ID：${SERVER_ID:-未设置}"
+
         echo "Worker URL：${WORKER_URL:-未设置}"
+
         echo "上报间隔：${REPORT_INTERVAL:-60} 秒"
+
         echo "采集间隔：${COLLECT_INTERVAL:-0} 秒"
+
         echo "连接模式：${CONNECTION_MODE:-auto}"
 
+
         if [ "${DEBUG:-0}" = "1" ]; then
+
             echo "调试日志：开启"
+
         else
+
             echo "调试日志：关闭"
         fi
 
-        echo "日志最大大小：${LOG_MAX_SIZE_MB:-$DEFAULT_LOG_MAX_SIZE_MB} MB"
-        echo "日志保留数量：${LOG_KEEP_COUNT:-$DEFAULT_LOG_KEEP_COUNT} 个"
+
+        echo "日志最大大小：${LOG_MAX_SIZE_MB:-5} MB"
+
+        echo "日志保留数量：${LOG_KEEP_COUNT:-3} 个"
+
+    else
+
+        echo "配置文件不存在：$CONFIG"
     fi
 
+
     echo
+
+
     echo "========== 日志统计 =========="
+
 
     if [ -f "$LOGFILE" ]; then
 
@@ -727,6 +818,7 @@ status() {
                 2>/dev/null
         )
 
+
         fail_count=$(
             grep \
                 -c \
@@ -734,6 +826,7 @@ status() {
                 "$LOGFILE" \
                 2>/dev/null
         )
+
 
         dns_fail_count=$(
             grep \
@@ -743,6 +836,7 @@ status() {
                 2>/dev/null
         )
 
+
         tls_fail_count=$(
             grep \
                 -c \
@@ -751,18 +845,19 @@ status() {
                 2>/dev/null
         )
 
+
         last_report=$(
             grep \
                 -E \
                 'report response http=|report failed:' \
                 "$LOGFILE" \
-                2>/dev/null \
-                | tail -n 1
+                2>/dev/null |
+            tail -n 1
         )
 
-        log_size=$(
-            get_file_size "$LOGFILE"
-        )
+
+        log_size=$(get_file_size "$LOGFILE")
+
 
         echo "上报成功次数：${success_count:-0}"
         echo "上报失败次数：${fail_count:-0}"
@@ -770,9 +865,13 @@ status() {
         echo "TLS 证书异常次数：${tls_fail_count:-0}"
         echo "当前日志大小：$((log_size / 1024)) KB"
 
+
         if [ -n "$last_report" ]; then
+
             echo "最近一次上报：$last_report"
+
         else
+
             echo "最近一次上报：暂无记录"
         fi
 
@@ -781,12 +880,17 @@ status() {
         echo "暂无日志。"
     fi
 
+
+    echo
+
     update_module_description
 }
+
 
 logs() {
 
     rotate_logs
+
 
     if [ -f "$LOGFILE" ]; then
 
@@ -797,6 +901,7 @@ logs() {
         log "暂无日志。"
     fi
 }
+
 
 case "${1:-}" in
 
@@ -839,4 +944,5 @@ case "${1:-}" in
         echo "$0 toggle-debug"
         exit 2
         ;;
+
 esac
