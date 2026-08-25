@@ -570,35 +570,56 @@ async function loadConfig() {
             result.stdout
         );
 
-    $('id').value =
-        config.ID || '';
+    $('serverId').value =
+        config.SERVER_ID || '';
 
     $('secret').value =
         config.SECRET || '';
 
-    $('url').value =
-        config.URL || '';
-
-    $('interval').value =
-        config.INTERVAL || '60';
+    $('workerUrl').value =
+        config.WORKER_URL || '';
 
     $('collectInterval').value =
         config.COLLECT_INTERVAL || '0';
 
+    $('reportInterval').value =
+        config.REPORT_INTERVAL || '60';
+
+    $('resetDay').value =
+        config.RESET_DAY || '1';
+
     $('connectionMode').value =
-        config.CONNECTION_MODE ||
-        'http';
+        config.CONNECTION_MODE || 'auto';
+
+    $('ctNode').value =
+        config.CT_NODE || '';
+
+    $('cuNode').value =
+        config.CU_NODE || '';
+
+    $('cmNode').value =
+        config.CM_NODE || '';
+
+    $('bdNode').value =
+        config.BD_NODE || '';
+
+    $('interface').value =
+        config.INTERFACE || '';
+
+    $('autoUpdate').value =
+        config.AUTO_UPDATE || '0';
+
+    $('updateProxy').value =
+        config.UPDATE_PROXY || '';
 
     $('debug').checked =
         config.DEBUG === '1';
 
     $('logMaxSize').value =
-        config.LOG_MAX_SIZE_MB ||
-        '5';
+        config.LOG_MAX_SIZE_MB || '5';
 
     $('logKeepCount').value =
-        config.LOG_KEEP_COUNT ||
-        '3';
+        config.LOG_KEEP_COUNT || '3';
 }
 
 
@@ -608,17 +629,33 @@ async function saveConfig(
 
     const payload = [
 
-        `ID=${$('id').value.trim()}`,
+        `SERVER_ID=${$('serverId').value.trim()}`,
 
         `SECRET=${$('secret').value.trim()}`,
 
-        `URL=${$('url').value.trim()}`,
-
-        `INTERVAL=${$('interval').value}`,
+        `WORKER_URL=${$('workerUrl').value.trim()}`,
 
         `COLLECT_INTERVAL=${$('collectInterval').value}`,
 
+        `REPORT_INTERVAL=${$('reportInterval').value}`,
+
+        `RESET_DAY=${$('resetDay').value}`,
+
         `CONNECTION_MODE=${$('connectionMode').value}`,
+
+        `CT_NODE=${$('ctNode').value.trim()}`,
+
+        `CU_NODE=${$('cuNode').value.trim()}`,
+
+        `CM_NODE=${$('cmNode').value.trim()}`,
+
+        `BD_NODE=${$('bdNode').value.trim()}`,
+
+        `INTERFACE=${$('interface').value.trim()}`,
+
+        `AUTO_UPDATE=${$('autoUpdate').value}`,
+
+        `UPDATE_PROXY=${$('updateProxy').value.trim()}`,
 
         `DEBUG=${$('debug').checked ? '1' : '0'}`,
 
@@ -1148,12 +1185,12 @@ document.addEventListener(
 
     <select id="connectionMode">
 
-        <option value="http">
-            HTTP
+        <option value="auto">
+            auto
         </option>
 
-        <option value="https">
-            HTTPS
+        <option value="http">
+            http
         </option>
 
     </select>

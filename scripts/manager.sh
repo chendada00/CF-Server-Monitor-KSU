@@ -3,9 +3,14 @@
 MODDIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 BIN="$MODDIR/bin/cf-probe"
-CONFIG="$MODDIR/config/config.conf"
 
 DATADIR="/data/adb/cf-server-monitor"
+
+# 运行时真正使用的配置
+CONFIG="$DATADIR/config.conf"
+
+# 模块内仅作为默认模板
+DEFAULT_CONFIG="$MODDIR/config/config.conf"
 
 PIDFILE="$DATADIR/cf-probe.pid"
 LOGDIR="$DATADIR/logs"
@@ -18,65 +23,101 @@ KSU_BUSYBOX="/data/adb/ksu/bin/busybox"
 # Android 环境下强制给探针提供 DNS。
 CF_PROBE_UPDATE_DNS_SERVER="223.5.5.5"
 
-# 日志轮转默认配置。
 DEFAULT_LOG_MAX_SIZE_MB=5
 DEFAULT_LOG_KEEP_COUNT=3
 
 mkdir -p "$DATADIR" "$LOGDIR"
 
+
 log() {
     printf '%s\n' "$*"
 }
+
 
 now() {
     date '+%Y-%m-%d %H:%M:%S'
 }
 
+
 write_manager_log() {
     printf '%s %s\n' "[$(now)]" "$*" >> "$LOGFILE"
 }
 
+
+init_config() {
+
+    if [ -f "$CONFIG" ]; then
+        return 0
+    fi
+
+    if [ ! -f "$DEFAULT_CONFIG" ]; then
+
+        log "[错误] 找不到默认配置文件：$DEFAULT_CONFIG"
+
+        return 1
+    fi
+
+    cp "$DEFAULT_CONFIG" "$CONFIG" || {
+
+        log "[错误] 无法创建运行时配置：$CONFIG"
+
+        return 1
+    }
+
+    chmod 600 "$CONFIG" 2>/dev/null || true
+}
+
+
 get_config_value() {
+
     key="$1"
 
     [ -f "$CONFIG" ] || return 1
 
-    value=$(sed -n \
-        "s/^${key}=\"\\(.*\\)\"$/\\1/p" \
-        "$CONFIG" \
-        | tail -n 1)
+    value=$(
+        sed -n \
+            "s/^${key}=\"\\(.*\\)\"$/\\1/p" \
+            "$CONFIG" |
+        tail -n 1
+    )
 
     printf '%s' "$value"
 }
 
+
 load_config() {
 
-    [ -f "$CONFIG" ] || {
-        log "[错误] 找不到配置文件：$CONFIG"
-        return 1
-    }
+    init_config || return 1
 
     # shellcheck disable=SC1090
     . "$CONFIG"
 
-    [ -n "${ID:-}" ] || {
-        log "[错误] Agent ID 不能为空"
+    [ -n "${SERVER_ID:-}" ] || {
+
+        log "[错误] Server ID 不能为空"
+
         return 1
     }
 
     [ -n "${SECRET:-}" ] || {
+
         log "[错误] Secret 不能为空"
+
         return 1
     }
 
-    [ -n "${URL:-}" ] || {
-        log "[错误] 服务端地址不能为空"
+    [ -n "${WORKER_URL:-}" ] || {
+
+        log "[错误] Worker URL 不能为空"
+
         return 1
     }
 
-    INTERVAL="${INTERVAL:-60}"
     COLLECT_INTERVAL="${COLLECT_INTERVAL:-0}"
-    CONNECTION_MODE="${CONNECTION_MODE:-http}"
+    REPORT_INTERVAL="${REPORT_INTERVAL:-60}"
+
+    CONNECTION_MODE="${CONNECTION_MODE:-auto}"
+
     DEBUG="${DEBUG:-0}"
 
     LOG_MAX_SIZE_MB="${LOG_MAX_SIZE_MB:-$DEFAULT_LOG_MAX_SIZE_MB}"
@@ -286,27 +327,42 @@ validate_config() {
     load_config ||
         return 1
 
-    case "$INTERVAL" in
+    case "$REPORT_INTERVAL" in
+
         ''|*[!0-9]*)
+
             log "[错误] 上报间隔必须是数字"
+
             return 1
             ;;
+
     esac
+
 
     case "$COLLECT_INTERVAL" in
+
         ''|*[!0-9]*)
+
             log "[错误] 采集间隔必须是数字"
+
             return 1
             ;;
+
     esac
 
+
     case "$CONNECTION_MODE" in
-        http|https)
+
+        auto|http)
             ;;
+
         *)
-            log "[错误] CONNECTION_MODE 只能是 http 或 https"
+
+            log "[错误] CONNECTION_MODE 只能是 auto 或 http"
+
             return 1
             ;;
+
     esac
 }
 
@@ -353,8 +409,8 @@ start() {
         "[管理器] $(now)" \
         "操作：启动探针" \
         "========================================" \
-        "[管理器] Agent ID=$ID" \
-        "[管理器] 服务地址=$URL" \
+        "[管理器] Agent ID=$SERVER_ID" \
+        "[管理器] 服务地址=$WORKER_URL" \
         "[管理器] 上报间隔=${INTERVAL}秒" \
         "[管理器] 采集间隔=${COLLECT_INTERVAL}秒" \
         "[管理器] 连接模式=$CONNECTION_MODE" \
@@ -364,7 +420,7 @@ start() {
         >> "$LOGFILE"
 
     log "正在启动探针..."
-    log "服务地址：$URL"
+    log "服务地址：$WORKER_URL"
     log "调试日志：$DEBUG_TEXT"
 
     if [ -x "$KSU_BUSYBOX" ]; then
@@ -568,11 +624,12 @@ status() {
         . "$CONFIG" 2>/dev/null || true
 
         echo "========== 当前配置 =========="
-        echo "Agent ID：${ID:-未设置}"
-        echo "服务地址：${URL:-未设置}"
-        echo "上报间隔：${INTERVAL:-60} 秒"
+
+        echo "Server ID：${SERVER_ID:-未设置}"
+        echo "Worker URL：${WORKER_URL:-未设置}"
+        echo "上报间隔：${REPORT_INTERVAL:-60} 秒"
         echo "采集间隔：${COLLECT_INTERVAL:-0} 秒"
-        echo "连接模式：${CONNECTION_MODE:-http}"
+        echo "连接模式：${CONNECTION_MODE:-auto}"
 
         if [ "${DEBUG:-0}" = "1" ]; then
             echo "调试日志：开启"
