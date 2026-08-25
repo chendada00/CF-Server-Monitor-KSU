@@ -14,7 +14,10 @@ LOGFILE="$DATA_DIR/cf-probe.log"
 BOOTLOG="$DATA_DIR/boot.log"
 
 KSU_BUSYBOX="/data/adb/ksu/bin/busybox"
-
+# 强制探针使用公共 DNS。
+# Android/KSU 环境下 /etc/resolv.conf 可能指向 [::1]:53，
+# 但手机上通常没有本地 DNS 服务，因此会导致所有域名解析失败。
+CF_PROBE_UPDATE_DNS_SERVER="223.5.5.5"
 mkdir -p "$DATA_DIR"
 
 
@@ -22,7 +25,51 @@ log() {
     echo "$*"
 }
 
+update_module_description() {
 
+    REPORT_INTERVAL_VALUE="$(get_config_value REPORT_INTERVAL 2>/dev/null || true)"
+
+    if [ -z "$REPORT_INTERVAL_VALUE" ]; then
+        REPORT_INTERVAL_VALUE="60"
+    fi
+
+    CURRENT_PID="$(get_pid 2>/dev/null || true)"
+
+    if [ -z "$CURRENT_PID" ]; then
+        CURRENT_PID="$(find_probe_pid 2>/dev/null || true)"
+    fi
+
+    if [ -n "$CURRENT_PID" ]; then
+
+        DESCRIPTION="● 探针运行中 | PID=$CURRENT_PID | 上报间隔=${REPORT_INTERVAL_VALUE}秒"
+
+    else
+
+        DESCRIPTION="● 探针已停止 | 上报间隔=${REPORT_INTERVAL_VALUE}秒"
+
+    fi
+
+    if [ -x "/data/adb/ksud" ]; then
+
+        /data/adb/ksud module config set \
+            override.description \
+            "$DESCRIPTION" \
+            >/dev/null 2>&1 || true
+
+        return 0
+
+    fi
+
+    if command -v ksud >/dev/null 2>&1; then
+
+        ksud module config set \
+            override.description \
+            "$DESCRIPTION" \
+            >/dev/null 2>&1 || true
+
+    fi
+
+}
 init_config() {
 
     if [ -f "$CONFIG" ]; then
@@ -272,6 +319,7 @@ start() {
         echo "[MANAGER] SERVER_ID=$SERVER_ID"
         echo "[MANAGER] WORKER_URL=$WORKER_URL"
         echo "[MANAGER] DEBUG=1"
+        echo "[MANAGER] CF_PROBE_UPDATE_DNS=$CF_PROBE_UPDATE_DNS_SERVER"
         echo "[MANAGER] Starting probe..."
     } >> "$LOGFILE"
 
@@ -281,10 +329,10 @@ start() {
     log "Worker URL=$WORKER_URL"
     log "Debug log=enabled"
 
-
     if [ -x "$KSU_BUSYBOX" ]; then
 
-        "$KSU_BUSYBOX" setsid \
+        CF_PROBE_UPDATE_DNS="$CF_PROBE_UPDATE_DNS_SERVER" \
+            "$KSU_BUSYBOX" setsid \
             "$BIN" run \
             -config="$CONFIG" \
             -debug=1 \
@@ -292,7 +340,8 @@ start() {
 
     else
 
-        nohup \
+        CF_PROBE_UPDATE_DNS="$CF_PROBE_UPDATE_DNS_SERVER" \
+            nohup \
             "$BIN" run \
             -config="$CONFIG" \
             -debug=1 \
@@ -334,7 +383,7 @@ start() {
 
 
     echo "$PID" > "$PIDFILE"
-
+    update_module_description
 
     log "Started successfully."
     log "PID=$PID"
@@ -372,7 +421,7 @@ stop() {
         rm -f "$PIDFILE"
 
         log "Already stopped."
-
+        update_module_description
         return 0
 
     fi
@@ -503,7 +552,7 @@ status() {
         tail -n 10 "$LOGFILE"
 
     fi
-
+    update_module_description
 }
 
 
