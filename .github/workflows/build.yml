@@ -226,19 +226,25 @@ jobs:
 
             echo "update.json committed to main"
           fi
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LOG=$(git log -1 --pretty=format:"%s")
 
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "## CF Server Monitor KSU" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "更新内容:" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "- $LOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       - name: Create GitHub Release
         if: steps.release.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: CF Server Monitor KSU ${{ steps.version.outputs.version }}
-          body: |
-            ## CF Server Monitor KSU
-
-            自动构建发布。
-
-            更新内容请查看本次提交记录。
+          body: ${{ steps.changelog.outputs.body }}
           files: |
             dist/CF-Server-Monitor-KSU.zip
             update.json
