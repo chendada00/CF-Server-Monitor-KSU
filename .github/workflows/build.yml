@@ -214,12 +214,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git fetch origin main
-          git checkout main
-          git pull --ff-only origin main
-
-          cp "$GITHUB_WORKSPACE/update.json" update.json
-
           git add update.json
 
           if git diff --cached --quiet; then
@@ -228,7 +222,7 @@ jobs:
             git commit \
               -m "chore: update module metadata to v${{ steps.version.outputs.version }} [skip ci]"
 
-            git push origin main
+            git push origin HEAD:main
 
             echo "update.json committed to main"
           fi
