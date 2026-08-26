@@ -1,40 +1,94 @@
-name: Build CF Server Monitor KSU Module
+name: Build and Release CF Server Monitor KSU Module
 
 on:
-
   push:
     branches:
       - main
 
-    tags:
-      - 'v*'
-
   workflow_dispatch:
-
 
 permissions:
   contents: write
 
+concurrency:
+  group: cf-server-monitor-release-main
+  cancel-in-progress: false
 
 jobs:
-
-  build:
-
+  build-and-release:
     runs-on: ubuntu-latest
 
-
     steps:
-
-      - name: Checkout
+      - name: Checkout current commit
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
+      - name: Read module version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(awk -F= '$1=="version"{print $2; exit}' module.prop | tr -d '\r\n[:space:]')"
+          VERSION_CODE="$(awk -F= '$1=="versionCode"{print $2; exit}' module.prop | tr -d '\r\n[:space:]')"
+
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: version is empty in module.prop"
+            exit 1
+          fi
+
+          if [ -z "$VERSION_CODE" ]; then
+            echo "ERROR: versionCode is empty in module.prop"
+            exit 1
+          fi
+
+          case "$VERSION_CODE" in
+            *[!0-9]*|'')
+              echo "ERROR: versionCode must be a positive integer"
+              exit 1
+              ;;
+          esac
+
+          TAG="v${VERSION}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          echo "Module version: $VERSION"
+          echo "Version code: $VERSION_CODE"
+          echo "Release tag: $TAG"
+
+      - name: Check whether this version already exists
+        id: release
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Git tag ${TAG} already exists"
+            echo "Version ${TAG} already exists. Build only, release will be skipped."
+            exit 0
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "reason=GitHub Release ${TAG} already exists"
+            echo "Version ${TAG} already exists. Build only, release will be skipped."
+            exit 0
+          fi
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "reason=New version detected"
+          echo "New version ${TAG} detected. Release will be created."
 
       - name: Download CF Probe ARM64
         shell: bash
         run: |
           PROBE_VERSION="$(tr -d '[:space:]' < probe-version)"
 
-          if [ -z "${PROBE_VERSION}" ]; then
+          if [ -z "$PROBE_VERSION" ]; then
             echo "ERROR: probe-version is empty!"
             exit 1
           fi
@@ -50,7 +104,7 @@ jobs:
             --retry 3 \
             --retry-delay 2 \
             -o bin/cf-probe \
-            "${PROBE_URL}"
+            "$PROBE_URL"
 
           chmod 755 bin/cf-probe
 
@@ -68,30 +122,13 @@ jobs:
 
           echo "ARM64 binary check passed."
 
-      - name: Read module version
-        id: version
-        shell: bash
-        run: |
-
-          VERSION=$(awk -F= '$1=="version"{print $2}' module.prop)
-
-          VERSION_CODE=$(awk -F= '$1=="versionCode"{print $2}' module.prop)
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
-
-
       - name: Build flashable ZIP
         shell: bash
         run: |
-
           rm -rf dist stage
 
           mkdir -p stage/module
-
           mkdir -p dist
-
 
           cp -a \
             module.prop \
@@ -106,28 +143,14 @@ jobs:
             webroot \
             stage/module/
 
-
           chmod 755 \
-            stage/module/customize.sh
-
-          chmod 755 \
-            stage/module/boot-completed.sh
-
-          chmod 755 \
-            stage/module/uninstall.sh
-
-          chmod 755 \
-            stage/module/action.sh
-
-          chmod 755 \
-            stage/module/scripts/manager.sh
-
-          chmod 755 \
-            stage/module/scripts/save-config.sh
-
-          chmod 755 \
+            stage/module/customize.sh \
+            stage/module/boot-completed.sh \
+            stage/module/uninstall.sh \
+            stage/module/action.sh \
+            stage/module/scripts/manager.sh \
+            stage/module/scripts/save-config.sh \
             stage/module/bin/cf-probe
-
 
           cd stage/module
 
@@ -135,91 +158,107 @@ jobs:
             ../../dist/CF-Server-Monitor-KSU.zip \
             .
 
+          cd ../..
+
+          echo "ZIP created:"
+          ls -lh dist/CF-Server-Monitor-KSU.zip
 
       - name: Generate update.json
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-
-          VERSION="${{ steps.version.outputs.version }}"
-
-          VERSION_CODE="${{ steps.version.outputs.version_code }}"
-
-
           cat > update.json <<EOF
           {
             "version": "${VERSION}",
             "versionCode": ${VERSION_CODE},
-            "zipUrl": "https://github.com/chendada00/CF-Server-Monitor-KSU/releases/latest/download/CF-Server-Monitor-KSU.zip",
-            "changelog": "https://github.com/chendada00/CF-Server-Monitor-KSU/releases/latest"
+            "zipUrl": "https://github.com/chendada00/CF-Server-Monitor-KSU/releases/download/${TAG}/CF-Server-Monitor-KSU.zip",
+            "changelog": "https://github.com/chendada00/CF-Server-Monitor-KSU/releases/tag/${TAG}"
           }
           EOF
 
-
           cat update.json
 
+          python3 -m json.tool update.json >/dev/null
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-
-          name: CF-Server-Monitor-KSU
-
+          name: CF-Server-Monitor-KSU-${{ steps.version.outputs.tag }}
           path: |
-
             dist/CF-Server-Monitor-KSU.zip
-
             update.json
+          if-no-files-found: error
+          retention-days: 14
 
-
-      - name: Commit update.json to main
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Create Git tag
+        if: steps.release.outputs.publish == 'true'
         shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-
           git config user.name "github-actions[bot]"
-
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+          echo "Created tag: $TAG"
+
+      - name: Commit update.json to main
+        if: steps.release.outputs.publish == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git fetch origin main
-
-
           git checkout main
-
-
           git pull --ff-only origin main
-
 
           cp "$GITHUB_WORKSPACE/update.json" update.json
 
-
           git add update.json
 
-
           if git diff --cached --quiet; then
-
             echo "update.json has no changes"
-
           else
-
             git commit \
-              -m "chore: update module metadata to ${{ steps.version.outputs.version }}"
+              -m "chore: update module metadata to v${{ steps.version.outputs.version }} [skip ci]"
 
             git push origin main
 
+            echo "update.json committed to main"
           fi
 
-
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.release.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
-
         with:
-
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: CF Server Monitor KSU ${{ steps.version.outputs.version }}
           generate_release_notes: true
-
           files: |
-
             dist/CF-Server-Monitor-KSU.zip
-
             update.json
+
+      - name: Build summary
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PUBLISH: ${{ steps.release.outputs.publish }}
+          REASON: ${{ steps.release.outputs.reason }}
+        run: |
+          {
+            echo "## CF Server Monitor KSU Build"
+            echo
+            echo "- Version: \`${VERSION}\`"
+            echo "- VersionCode: \`${VERSION_CODE}\`"
+            echo "- Tag: \`${TAG}\`"
+            echo "- Release: \`${PUBLISH}\`"
+            echo "- Reason: ${REASON}"
+          } >> "$GITHUB_STEP_SUMMARY"
