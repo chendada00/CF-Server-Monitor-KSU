@@ -1,7 +1,7 @@
 id=cf-server-monitor
 name=CF Server Monitor
-version=1.0.4
-versionCode=5
+version=1.0.5
+versionCode=6
 author=伴随
 description=CF Server Monitor Android/KSU Agent
 updateJson=https://raw.githubusercontent.com/chendada00/CF-Server-Monitor-KSU/main/update.json

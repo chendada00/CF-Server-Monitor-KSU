@@ -233,7 +233,12 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: CF Server Monitor KSU ${{ steps.version.outputs.version }}
-          generate_release_notes: true
+          body: |
+            ## CF Server Monitor KSU
+
+            自动构建发布。
+
+            更新内容请查看本次提交记录。
           files: |
             dist/CF-Server-Monitor-KSU.zip
             update.json

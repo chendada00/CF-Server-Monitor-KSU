@@ -1203,6 +1203,18 @@ if (
     init();
 }
 
+
+document.addEventListener(
+    "visibilitychange",
+    () => {
+        if (document.visibilityState === "visible") {
+            if (typeof refreshStatus === "function") {
+                refreshStatus();
+            }
+        }
+    }
+);
+
 </script>
 
 </head>
