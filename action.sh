@@ -3,67 +3,58 @@
 MODDIR="${0%/*}"
 MANAGER="$MODDIR/scripts/manager.sh"
 
-# 颜色输出（可选）
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# 强制开启调试输出
+set -x
+exec 2>&1
 
-# 获取input设备（自动检测）
-get_input_device() {
-    # 尝试常见的input设备路径
-    for dev in /dev/input/event0 /dev/input/event1 /dev/input/event2 /dev/input/event3; do
-        if [ -e "$dev" ]; then
-            # 检查是否是真正的输入设备（不是鼠标等）
-            local dev_name=$(cat /proc/bus/input/devices 2>/dev/null | grep -A 5 "event$(echo $dev | sed 's/.*event//')" | grep "Name" | head -1)
-            if echo "$dev_name" | grep -qi "volume\|keyboard\|gpio\|power"; then
-                echo "$dev"
-                return 0
-            fi
-        fi
-    done
-    # 如果找不到，默认使用event0
-    echo "/dev/input/event0"
+echo "========================================"
+echo "CF Server Monitor - 音量键控制版"
+echo "脚本启动时间: $(date)"
+echo "========================================"
+
+# 函数：打印日志
+log() {
+    echo "[$(date '+%H:%M:%S')] $*"
 }
 
-INPUT_DEVICE=$(get_input_device)
+log "开始初始化..."
 
-# 读取按键事件
-read_key_event() {
-    local timeout=${1:-0.5}
-    # 使用dd读取固定字节，避免阻塞
-    local event=$(timeout "$timeout" dd if="$INPUT_DEVICE" bs=24 count=1 2>/dev/null | hexdump -e '16/1 "%02x "')
-    echo "$event"
-}
+# 检查manager.sh是否存在
+if [ ! -f "$MANAGER" ]; then
+    log "错误: manager.sh 不存在于 $MANAGER"
+    exit 1
+fi
+log "找到 manager.sh: $MANAGER"
 
-# 检测按键码
-# 音量+ 通常是 0x73 (KEY_VOLUMEUP)
-# 音量- 通常是 0x72 (KEY_VOLUMEDOWN)
-detect_volume_key() {
-    local event_data="$1"
-    local has_up=0
-    local has_down=0
+# 使用getevent直接检测（最可靠的方式）
+log "使用 getevent 方式检测音量键..."
+
+# 创建临时文件存储事件
+TEMP_EVENT="/tmp/volume_event_$$"
+log "临时文件: $TEMP_EVENT"
+
+# 获取音量键事件码的函数
+get_volume_events() {
+    log "正在检测音量键事件码..."
     
-    if echo "$event_data" | grep -q "73"; then
-        has_up=1
-    fi
-    if echo "$event_data" | grep -q "72"; then
-        has_down=1
-    fi
+    # 启动getevent并过滤
+    log "请按音量+或音量-键测试..."
+    log "等待按键输入（5秒超时）..."
     
-    if [ $has_up -eq 1 ] && [ $has_down -eq 0 ]; then
-        echo "up"
-    elif [ $has_up -eq 0 ] && [ $has_down -eq 1 ]; then
-        echo "down"
-    elif [ $has_up -eq 1 ] && [ $has_down -eq 1 ]; then
-        echo "both"
+    # 使用getevent获取事件
+    local result=$(timeout 5 getevent 2>/dev/null | grep -m 1 -E "KEY_VOLUMEUP|KEY_VOLUMEDOWN|00000073|00000072" | head -1)
+    
+    if [ -n "$result" ]; then
+        log "检测到按键: $result"
+        echo "$result" > "$TEMP_EVENT"
+        return 0
     else
-        echo "none"
+        log "未检测到音量键"
+        return 1
     fi
 }
 
-# 显示菜单
+# 简单的菜单显示（不依赖任何特殊命令）
 show_menu() {
     local selected=$1
     local options=(
@@ -76,92 +67,119 @@ show_menu() {
         "退出"
     )
     
-    clear 2>/dev/null || echo ""
-    echo "========================================"
-    echo "      CF Server Monitor - 音量键控制"
-    echo "========================================"
     echo ""
-    echo "  音量+ : 切换选项    音量- : 确认选择"
-    echo ""
-    echo "----------------------------------------"
+    echo "========================================"
+    echo "      CF Server Monitor"
+    echo "========================================"
+    echo "  操作说明:"
+    echo "  音量+ : 切换到下一个选项"
+    echo "  音量- : 执行选中的操作"
+    echo "========================================"
     
     for i in "${!options[@]}"; do
         if [ $i -eq $selected ]; then
-            echo "  ${GREEN}▶ $((i+1)). ${options[$i]}${NC}"
+            echo "  ▶ [$((i+1))] ${options[$i]}  ← 当前选中"
         else
-            echo "    $((i+1)). ${options[$i]}"
+            echo "    [$((i+1))] ${options[$i]}"
         fi
     done
-    echo ""
-    echo "----------------------------------------"
-    echo "  当前选中: ${YELLOW}${options[$selected]}${NC}"
-    echo "  按音量- 确认执行"
     echo "========================================"
+    echo "  当前选中: ${options[$selected]}"
+    echo "  按 音量- 执行"
+    echo "========================================"
+}
+
+# 等待按键（简化版）
+wait_for_key() {
+    local timeout=${1:-1}
+    local result=""
+    
+    # 使用getevent读取按键
+    result=$(timeout "$timeout" getevent -l 2>/dev/null | grep -m 1 -E "KEY_VOLUMEUP|KEY_VOLUMEDOWN" | awk '{print $NF}')
+    
+    echo "$result"
 }
 
 # 确认对话框
 confirm_action() {
     local action="$1"
-    local confirm_count=0
-    local max_confirm=3
+    local count=0
     
     echo ""
     echo "========================================"
-    echo "  ⚠️  确认执行: ${YELLOW}$action${NC}"
+    echo "  ⚠️  确认执行: $action"
     echo "========================================"
-    echo ""
-    echo "  请再次按 音量- 确认执行"
-    echo "  按 音量+ 取消"
+    echo "  按 音量- 确认  按 音量+ 取消"
     echo ""
     echo -n "  等待确认"
     
-    while [ $confirm_count -lt 10 ]; do
-        local event=$(read_key_event 0.3)
-        local key=$(detect_volume_key "$event")
+    while [ $count -lt 8 ]; do
+        local key=$(wait_for_key 0.3)
         
         case "$key" in
-            down)
+            KEY_VOLUMEDOWN)
                 echo ""
-                echo "  ${GREEN}✅ 已确认，正在执行...${NC}"
+                echo "  ✅ 已确认，正在执行..."
                 return 0
                 ;;
-            up)
+            KEY_VOLUMEUP)
                 echo ""
-                echo "  ${RED}❌ 已取消${NC}"
+                echo "  ❌ 已取消"
                 return 1
                 ;;
         esac
         
-        confirm_count=$((confirm_count + 1))
+        count=$((count + 1))
         echo -n "."
         sleep 0.3
     done
     
     echo ""
-    echo "  ${YELLOW}⏰ 操作超时，已取消${NC}"
+    echo "  ⏰ 操作超时，已取消"
     return 1
 }
 
 # 执行操作
 execute_action() {
     local action_index=$1
-    local action_name=""
-    
-    case $action_index in
-        0) action_name="启动服务"; /system/bin/sh "$MANAGER" start ;;
-        1) action_name="停止服务"; /system/bin/sh "$MANAGER" stop ;;
-        2) action_name="重启服务"; /system/bin/sh "$MANAGER" restart ;;
-        3) action_name="查看状态"; /system/bin/sh "$MANAGER" status ;;
-        4) action_name="查看日志"; /system/bin/sh "$MANAGER" logs ;;
-        5) action_name="查看版本"; /system/bin/sh "$MANAGER" version ;;
-        6) action_name="退出"; exit 0 ;;
-    esac
     
     echo ""
     echo "========================================"
     echo "  执行结果："
     echo "========================================"
-    echo ""
+    
+    case $action_index in
+        0) 
+            log "执行: 启动服务"
+            /system/bin/sh "$MANAGER" start
+            ;;
+        1) 
+            log "执行: 停止服务"
+            /system/bin/sh "$MANAGER" stop
+            ;;
+        2) 
+            log "执行: 重启服务"
+            /system/bin/sh "$MANAGER" restart
+            ;;
+        3) 
+            log "执行: 查看状态"
+            /system/bin/sh "$MANAGER" status
+            ;;
+        4) 
+            log "执行: 查看日志"
+            /system/bin/sh "$MANAGER" logs
+            ;;
+        5) 
+            log "执行: 查看版本"
+            /system/bin/sh "$MANAGER" version
+            ;;
+        6) 
+            log "退出程序"
+            exit 0
+            ;;
+    esac
+    
+    echo "========================================"
 }
 
 # 主循环
@@ -169,25 +187,26 @@ main_loop() {
     local selected=0
     local total_options=7
     
-    # 清空输入缓冲区
-    dd if="$INPUT_DEVICE" bs=24 count=10 2>/dev/null
+    log "进入主循环..."
+    log "提示: 按音量+切换选项，按音量-执行操作"
+    
+    # 先显示一次菜单
+    show_menu $selected
     
     while true; do
-        show_menu $selected
-        
         # 等待按键
-        local event=$(read_key_event 0.5)
-        local key=$(detect_volume_key "$event")
+        local key=$(wait_for_key 0.5)
         
         case "$key" in
-            up)
-                # 音量+ 向上切换
-                selected=$((selected - 1))
-                if [ $selected -lt 0 ]; then
-                    selected=$((total_options - 1))
+            KEY_VOLUMEUP)
+                # 音量+ 切换到下一个
+                selected=$((selected + 1))
+                if [ $selected -ge $total_options ]; then
+                    selected=0
                 fi
+                show_menu $selected
                 ;;
-            down)
+            KEY_VOLUMEDOWN)
                 # 音量- 确认选择
                 local action_name=""
                 case $selected in
@@ -200,66 +219,54 @@ main_loop() {
                     6) action_name="退出" ;;
                 esac
                 
-                # 二次确认
                 if confirm_action "$action_name"; then
                     execute_action $selected
                     if [ $selected -ne 6 ]; then
                         echo ""
-                        echo "  按任意音量键继续..."
-                        read_key_event 2 > /dev/null
-                    else
-                        exit 0
+                        echo "按任意音量键继续..."
+                        wait_for_key 2 > /dev/null
+                        show_menu $selected
                     fi
                 else
-                    echo ""
-                    echo "  按任意音量键继续..."
-                    read_key_event 2 > /dev/null
+                    show_menu $selected
                 fi
                 ;;
-            both)
-                # 同时按两个键 - 快速退出
-                echo ""
-                echo "  ${RED}强制退出${NC}"
-                exit 0
-                ;;
         esac
+        
+        sleep 0.1
     done
 }
 
-# 检查manager.sh是否存在
-if [ ! -f "$MANAGER" ]; then
-    echo "错误: manager.sh 不存在于 $MANAGER"
-    exit 1
-fi
-
-# 检查input设备
-if [ ! -e "$INPUT_DEVICE" ]; then
-    echo "警告: 找不到输入设备 $INPUT_DEVICE"
-    echo "尝试使用备用方案..."
-    # 可以在这里添加备用方案，比如使用/proc或/sys接口
-fi
-
 # 主入口
+log "脚本参数: $*"
+
 case "$1" in
     menu|"")
+        log "启动音量键交互模式..."
         main_loop
         ;;
     start|1)
+        log "执行: 启动服务"
         /system/bin/sh "$MANAGER" start
         ;;
     stop|2)
+        log "执行: 停止服务"
         /system/bin/sh "$MANAGER" stop
         ;;
     restart|3)
+        log "执行: 重启服务"
         /system/bin/sh "$MANAGER" restart
         ;;
     status|4)
+        log "执行: 查看状态"
         /system/bin/sh "$MANAGER" status
         ;;
     logs|5)
+        log "执行: 查看日志"
         /system/bin/sh "$MANAGER" logs
         ;;
     version|6)
+        log "执行: 查看版本"
         /system/bin/sh "$MANAGER" version
         ;;
     *)
@@ -274,3 +281,5 @@ case "$1" in
         echo "  version|6      - 查看版本"
         ;;
 esac
+
+log "脚本执行完毕"
